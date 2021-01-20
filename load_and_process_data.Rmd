@@ -1,0 +1,1454 @@
+---
+title: "Nich dynamics and ecological origins of migration - Load & Process Data"
+author: "Scott Yanco"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+---
+
+# Initialization
+
+Load required libraries and import custom functions.
+
+Custom functions:
+```{r}
+source("functions.R")
+```
+
+Libraries:
+
+```{r}
+#Data processing
+library(lubridate)
+library(pinpointreadR)
+library(tidyverse)
+library(auk)
+
+#Spatial
+library(sf)
+library(raster)
+library(MODIStsp)
+library(sp)
+```
+
+
+# Key Transition Dates
+
+Estimate key transition dates for all tracked birds to enable assignment of fixes to particular seasons.
+
+Load in the .csv file containing  basic dates (as well as dates from Linkhart et al. 2016).
+
+```{r}
+timing <- read.csv("../data/dep-arr_dates_01202021.csv", stringsAsFactors = F,
+                   na.strings = "NA")
+```
+
+Convert all the "raw" transition dates to day of year (DOY):
+```{r}
+#convert dates to day of year (doy)
+timing$last_on_terr_doy <- yday(as.Date(timing$last_on_terr, 
+                                        format = "%m/%d/%y"))
+timing$first_mig_doy <- yday(as.Date(timing$first_mig, 
+                                     format = "%m/%d/%y"))
+timing$last_mig_doy <- yday(as.Date(timing$last_mig, 
+                                    format = "%m/%d/%y"))
+timing$first_on_terr_doy <- yday(as.Date(timing$first_on_terr, 
+                                         format = "%m/%d/%y"))
+timing$wint_arr_doy <- yday(as.Date(timing$wint_arr, 
+                                    format = "%m/%d/%y"))
+timing$wint_dep_doy <- yday(as.Date(timing$wint_dep, 
+                                    format = "%m/%d/%y"))
+```
+
+We can estimate the breeding season departure/arrival dates as the day between the last known on-territory fix and the first fix on migration:
+```{r}
+#take midpoints as departure or arrival date
+timing$departure <- (timing$last_on_terr_doy + timing$first_mig_doy)/2
+timing$arrival <- (timing$last_mig_doy + timing$first_on_terr_doy)/2
+```
+
+Calculate the duration of spring and fall migration and spit out some summary stats:
+```{r}
+(timing$spdur <- timing$first_on_terr_doy - timing$wint_dep_doy)
+(timing$fadur <- timing$wint_arr_doy - timing$last_on_terr_doy)
+# 
+# #migration duration - using this study only
+# median(na.omit(timing$spdur[1:8]))
+# median(na.omit(timing$fadur[1:8]))
+# min(na.omit(timing$spdur[1:8]))
+# max(na.omit(timing$spdur[1:8]))
+# min(na.omit(timing$fadur[1:8]))
+# max(na.omit(timing$fadur[1:8]))
+```
+
+Create separate timing objects for each study site (used for breeding season phenology)
+
+```{r}
+hc_time <- timing[timing$study_area == "HC",]
+mef_time <- timing[timing$study_area == "MEF",]
+id_time <- timing[timing$study_area == "ID",]
+ut_time <- timing[timing$study_area == "UT",]
+```
+
+#SY - VERIFY THIS IS STILL NEEDED ####
+Define some "conservative" boundaries for population-level wintering and breeding so minimize the chance of any observations during this period being of en route migrants (e.g. start of winter = the last observed fall>winter transition and end of winter is earliest observed winter>spring transition):
+```{r}
+start_breed <- max(na.omit(timing$arrival))
+end_breed <- min(na.omit(timing$departure))
+start_wint <- max(na.omit(timing$wint_arr_doy))
+end_wint <- min(na.omit(timing$wint_dep_doy))
+```
+
+# Load and Process Tracking Data
+
+Load in all the collected GPS data.  Start with known breeding season locations for all tracked birds (either the known nest or the lure net capture location).
+
+```{r}
+breed_loc <- read.csv("../data/breed_locs_01202021.csv")
+```
+
+Load in all the GPS data using `pinpointreadR`:
+
+```{r message=FALSE, warning = FALSE}
+
+#Note: warnings suppressed to limit output of parsing issues that do not affect data
+
+#### HOT CREEK ####
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/cp1_2017-PinPoint 41155 2018-06-06 10-17-41.txt", 
+  birdID = "CP1", start = "17/8/1 00:00:01", stop = "18/6/1 00:00:01", 
+  band = "1833-03440", breedyear = 2017)
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/cp11_2016-PinPoint 40920 2018-07-05 17-14-10.txt", 
+  birdID = "CP11", start = "16/7/25 00:00:01", stop = "17/8/1 00:00:01", 
+  band = "1783-74386", breedyear = 2016, database = mig_tracks)
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/cp11_2018-PinPoint 2152 2019-06-15 13-06-42.txt", 
+  birdID = "CP11", start = "18/7/11 00:00:01", stop = "19/6/13 00:00:01", 
+  band = "1783-74386", breedyear = 2018, database = mig_tracks)
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/rp15_2018-PinPoint 2145 2019-06-14 09-47-33.txt", 
+  birdID = "RP15", start = "18/8/1 00:00:01", stop = "19/8/1 00:00:01", 
+  band = "1833-03428", breedyear = 2018, database = mig_tracks)
+
+
+#### MANITOU EXP FOREST ####
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/PinPoint 48999 2019-06-18 01-12-59.txt", 
+  birdID = "A41", start = "18/7/27 03:49:01", stop = "19/6/17 03:27:01", 
+  band = "1833-32535", breedyear = 2018, database = mig_tracks)
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/PinPoint 40947 2017-07-06 01-43-30.txt", 
+  birdID = "A43", start = "16/7/27 03:41:01", stop = "17/7/6 02:45:01", 
+  band = "1783-64497", breedyear = 2016, database = mig_tracks)
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/A44_2019.txt", 
+  birdID = "A44", start = "18/7/13 05:20:01", stop = "19/6/8 03:10:01", 
+  band = "1833-32577", breedyear = 2018, database = mig_tracks)
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/PinPoint 48199 2019-07-12 01-07-08.txt", 
+  birdID = "CNG1", start = "18/7/21 03:13:01", stop = "19/7/11 00:00:01", 
+  band = "1833-32521", breedyear = 2018, database = mig_tracks)
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/BG5_2019_20-07-17 18-18-37.txt", 
+  birdID = "BG5", start = "19/7/22 00:00:01", stop = "20/7/01 00:00:01", 
+  band = "1833-03550", breedyear = 2019, database = mig_tracks)
+
+
+#### UTAH ####
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/03085-PinPoint 3085 2020-06-04 20-40-33.txt", 
+  birdID = "03489", start = "19/7/13 00:00:01", stop = "20/7/01 00:00:01", 
+  band = "1603-03489", breedyear = 2019, database = mig_tracks)
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/03503-PinPoint 3079 2020-06-16 11-08-54.txt", 
+  birdID = "03503", start = "19/7/25 00:00:01", stop = "20/7/01 00:00:01", 
+  band = "1603-03503", breedyear = 2019, database = mig_tracks)
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/03504-PinPoint 3073 2020-06-24 11-36-37.txt", 
+  birdID = "03504", start = "19/8/01 00:00:01", stop = "20/7/01 00:00:01", 
+  band = "1603-03504", breedyear = 2019, database = mig_tracks)
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/PinPoint 3069 2020-10-19 07-56-56.txt", 
+  birdID = "03387", start = "19/8/01 00:00:01", stop = "20/7/01 00:00:01", 
+  band = "1603-03387", breedyear = 2019, database = mig_tracks)
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/PinPoint 3068 2020-12-07 14-28-09.txt", 
+  birdID = "03495", start = "19/8/03 00:05:01", stop = "20/7/01 00:00:01", 
+  band = "1603-03495", breedyear = 2019, database = mig_tracks)
+
+#### IDAHO ####
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/03480-PinPoint 3077 2020-06-29 11-16-47.txt", 
+  birdID = "03480", start = "19/7/27 00:00:01", stop = "20/7/01 00:00:01", 
+  band = "1833-03480", breedyear = 2019, database = mig_tracks)
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/03482-PinPoint 2145 2020-06-29 10-47-57.txt", 
+  birdID = "03482", start = "19/7/29 00:00:01", stop = "20/7/01 00:00:01", 
+  band = "1833-03482", breedyear = 2019, database = mig_tracks)
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/03483-PinPoint 3071 2020-06-29 11-05-34.txt", 
+  birdID = "03483", start = "19/8/10 00:00:01", stop = "20/7/01 00:00:01", 
+  band = "1833-03483", breedyear = 2019, database = mig_tracks)
+```
+
+Several processing steps.
+
+Filter out any records missing location information as well as any fixes with HDOP > 5:
+
+```{r}
+#clean out entries missing coordinates
+mig_tracks <- mig_tracks[!is.na(mig_tracks$Longitude) & 
+                           !is.na(mig_tracks$Latitude),]
+#filter points with high HDOP
+mig_tracks <- mig_tracks[mig_tracks$HDOP < 5,]
+```
+
+Create a few convenience columns: one with a "bird_year" identifier, a new date column, and also a column that converts dates into DOY:
+```{r}
+#create bird_year identifier
+mig_tracks$bird_year <- as.factor(paste0(mig_tracks$bird_id, "_", 
+                                         mig_tracks$breedyr))
+#make new date column in tracks
+mig_tracks$date <- as.Date(mig_tracks$`RTC-date`, format = "%y/%m/%d")
+
+#create doy variable
+mig_tracks$event_doy <- yday(mig_tracks$`RTC-date`) 
+```
+
+Create a couple spatial objects:  one is just an `sf` object of these points and one is an `sf` object that converts the points to a linestring for nice plotting of the tracks.
+```{r}
+#convert to both mig_tracks and mig_tracks_winter to sf objects
+mig_tracks_sf <- st_as_sf(mig_tracks, coords = c("Longitude", "Latitude"), 
+                          crs = 4326) 
+
+#key to assign study area variable to each individual
+sa_key <- read.csv("../data/study_area_key.csv")
+
+#set mig_tracks as linestring grouped by individual
+mig_tracks_line <- group_by(mig_tracks_sf, bird_year) %>%
+  summarise(do_union = F) %>%
+  st_cast("LINESTRING") %>% 
+  left_join(sa_key)
+```
+
+## Owl Location Imputation
+
+Several imputation steps to make to e.g., fill in fixes for known stationary periods as well as for counterfactual simulations.
+
+### Breeing season imputation
+
+First, create imputed breeding locations for each bird based on the `breed_loc` object that documented summer nest or capture locations.
+
+Because NDVI data is in 8-day intervals, we thin the imputed breeding season data to every 8 days to reduce pseudoreplication via upsampling.  While the nighttime temperatures are on a daily interval, we'll use the same imputation-augmented dataset for all analyses (conservative choice).
+
+```{r}
+#make interpolated breeding positions for each bird 
+#MEF
+a41_breed <- makeBreedVec("A41_2018", breed_loc, timing, mig_tracks, 
+                          origin1 = "2018-01-01", origin2 = "2019-01-01",
+                          thin = 8)
+a44_breed <- makeBreedVec("A44_2018", breed_loc, timing, mig_tracks, 
+                          origin1 = "2018-01-01", origin2 = "2019-01-01",
+                          thin = 8)
+a43_breed <- makeBreedVec("A43_2016", breed_loc, timing, mig_tracks, 
+                          origin1 = "2016-01-01", origin2 = "2017-01-01",
+                          thin = 8)
+cng1_breed <- makeBreedVec("CNG1_2018", breed_loc, timing, mig_tracks, 
+                           origin1 = "2018-01-01", origin2 = "2019-01-01",
+                           thin = 8)
+bg5_breed <- makeBreedVec("BG5_2019", breed_loc, timing, mig_tracks, 
+                          origin1 = "2019-01-01", origin2 = "2020-01-01",
+                          thin = 8)
+
+#HC
+rp15_breed <- makeBreedVec("RP15_2018", breed_loc, timing, mig_tracks, 
+                           origin1 = "2018-01-01", origin2 = "2019-01-01",
+                           thin = 8)
+cp11_16_breed <- makeBreedVec("CP11_2016", breed_loc, timing, mig_tracks, 
+                              origin1 = "2016-01-01", origin2 = "2017-01-01",
+                              thin = 8)
+cp11_18_breed <- makeBreedVec("CP11_2018", breed_loc, timing, mig_tracks, 
+                              origin1 = "2018-01-01", origin2 = "2019-01-01",
+                              thin = 8)
+cp1_breed <- makeBreedVec("CP1_2017", breed_loc, timing, mig_tracks, 
+                          origin1 = "2017-01-01", origin2 = "2018-01-01",
+                          thin = 8)
+
+#UT
+breed_3489 <- makeBreedVec("03489_2019", breed_loc, timing, mig_tracks, 
+                           origin1 = "2019-01-01", origin2 = "2020-01-01",
+                           thin = 8)
+breed_3503 <- makeBreedVec("03503_2019", breed_loc, timing, mig_tracks, 
+                           origin1 = "2019-01-01", origin2 = "2020-01-01",
+                           thin = 8)
+breed_3504 <- makeBreedVec("03504_2019", breed_loc, timing, mig_tracks, 
+                           origin1 = "2019-01-01", origin2 = "2020-01-01",
+                           thin = 8)
+breed_3387 <- makeBreedVec("03387_2019", breed_loc, timing, mig_tracks, 
+                           origin1 = "2019-01-01", origin2 = "2020-01-01",
+                           thin = 8)
+breed_3495 <- makeBreedVec("03495_2019", breed_loc, timing, mig_tracks, 
+                           origin1 = "2019-01-01", origin2 = "2020-01-01",
+                           thin = 8)
+
+#ID
+breed_3480 <- makeBreedVec("03480_2019", breed_loc, timing, mig_tracks, 
+                           origin1 = "2019-01-01", origin2 = "2020-01-01",
+                           thin = 8)
+breed_3482 <- makeBreedVec("03482_2019", breed_loc, timing, mig_tracks, 
+                           origin1 = "2019-01-01", origin2 = "2020-01-01",
+                           thin = 8)
+breed_3483 <- makeBreedVec("03483_2019", breed_loc, timing, mig_tracks, 
+                           origin1 = "2019-01-01", origin2 = "2020-01-01",
+                           thin = 8)
+```
+
+Now we can add these new breeding locations to the total data set (`mig_tracks_sf`) and then convert it to the same projection as the MODIS data (faster to convert the points than the huge raster stacks). We also clean out some intermediary objects again just to manage the global environment.
+
+Note, I've suppressed warnings here because it spits out a bunch about converting factors to characters but it works totally fine.
+```{r warning=FALSE}
+#combine interpolated breeding positions with recorded fixes
+mig_tracks_new <- rbind_sf(plyr::compact(list(mig_tracks_sf, 
+                                              a41_breed, a44_breed, a43_breed, 
+                                              cng1_breed, bg5_breed,
+                                              
+                                              rp15_breed, cp11_16_breed, 
+                                              cp11_18_breed, cp1_breed, 
+                                              
+                                              breed_3489, breed_3503, 
+                                              breed_3504, breed_3387, 
+                                              breed_3495,
+                                              
+                                              breed_3480, breed_3482, 
+                                              breed_3483)))
+
+#transform into same projection as MODIS data
+mig_tracks_sinu <- st_transform(mig_tracks_new, 
+                                crs = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 
+                                +a=6371007.181 +b=6371007.181 +units=m 
+                                +no_defs")
+
+rm(a41_breed, a44_breed, a43_breed, cng1_breed, bg5_breed, 
+   rp15_breed, cp11_16_breed, cp11_18_breed, cp1_breed, 
+   breed_3489, breed_3503, breed_3504, breed_3387, breed_3495, 
+   breed_3480, breed_3482, breed_3483,
+   mig_tracks_new)
+```
+
+### Winter season imputation
+
+Now we do the same thing but for stationary portions of the winter period.  We've set the function `makeWintVec` so that if any two consecutive points are <1000 m apart, we impute fixes equidistant between the two for any days between the recorded fixes.  We do this for each bird.  We'll see some birds for which we don't have enough info in the winter to impute any points.
+```{r warning=FALSE}
+#create interpolated positions for winter stationary periods (moves <1000m)
+#MEF
+a41_wint <- makeWintVec("A41_2018", timing, mig_tracks_sinu,
+                        dist_thresh = 1000)
+a44_wint <- makeWintVec("A44_2018", timing, mig_tracks_sinu,
+                        dist_thresh = 1000)
+a43_wint <- makeWintVec("A43_2016", timing, mig_tracks_sinu,
+                        dist_thresh = 1000)
+cng1_wint <- makeWintVec("CNG1_2018", timing, mig_tracks_sinu,
+                         dist_thresh = 1000)
+bg5_wint <- makeWintVec("BG5_2019", timing, mig_tracks_sinu,
+                        dist_thresh = 1000)
+
+#HC
+rp15_wint <- makeWintVec("RP15_2018", timing, mig_tracks_sinu,
+                         dist_thresh = 1000)
+cp11_16_wint <- makeWintVec("CP11_2016", timing, mig_tracks_sinu,
+                            dist_thresh = 1000)
+cp11_18_wint <- makeWintVec("CP11_2018", timing, mig_tracks_sinu,
+                            dist_thresh = 1000)
+cp1_wint <- makeWintVec("CP1_2017", timing, mig_tracks_sinu,
+                        dist_thresh = 1000)
+
+#UT
+wint_3489 <- makeWintVec("03489_2019", timing, mig_tracks_sinu,
+                         dist_thresh = 1000)
+wint_3503 <- makeWintVec("03503_2019", timing, mig_tracks_sinu,
+                         dist_thresh = 1000)
+wint_3504 <- makeWintVec("03504_2019", timing, mig_tracks_sinu,
+                         dist_thresh = 1000)
+wint_3387 <- makeWintVec("03504_2019", timing, mig_tracks_sinu,
+                         dist_thresh = 1000)
+wint_3495 <- makeWintVec("03495_2019", timing, mig_tracks_sinu,
+                         dist_thresh = 1000)
+
+
+#ID
+wint_3480 <- makeWintVec("03480_2019", timing, mig_tracks_sinu,
+                         dist_thresh = 1000)
+wint_3482 <- makeWintVec("03482_2019", timing, mig_tracks_sinu,
+                         dist_thresh = 1000)
+wint_3483 <- makeWintVec("03483_2019", timing, mig_tracks_sinu,
+                         dist_thresh = 1000)
+```
+
+Now we add these points into the total data set as well - note that because the winter imputation uses the collected data, and we did this after we had converted those data to the sinu projection, we need to add sinu to sinu here.  Again, we'll clean some objects out.
+```{r warning=FALSE}
+#add the interpolated winter points to the dataset
+#(must be the same projection as the dataset fed into `makeWintVec`)
+mig_tracks_sinu <- rbind_sf(plyr::compact(list(mig_tracks_sinu,
+                                               
+                                               a41_wint, a44_wint, a43_wint,
+                                               cng1_wint, bg5_wint,
+                                               
+                                               rp15_wint, cp11_16_wint, 
+                                               cp11_18_wint, cp1_wint,
+                                               
+                                               wint_3489, wint_3503, wint_3504,
+                                               wint_3387, wint_3495,
+                                               
+                                               wint_3480, wint_3482, 
+                                               wint_3483)))
+
+#clean out some intermediary objects
+rm(a41_wint, a44_wint, a43_wint, cng1_wint, b5_wint,
+   rp15_wint, cp11_16_wint, cp11_18_wint, cp1_wint, 
+   wint_3489, wint_3503, wint_3504, wint_3387, wint_3495,
+   wint_3480, wint_3482, wint_3483)
+```
+
+### Counterfactual summer fixes
+
+Now we'll simulate counterfactual fixes as though the birds had never migrated north from their wintering grounds.
+
+First we generate hypothetical positions for each bird using `makeHypoBreed`.  The origin arguments just help set date objects - the `hyporigin` needs to be the first day of the calendar year after tracking began and `trackorigin` should be the first day of the calendar year in which tracking began (e.g., if tracking began in July of 2017, `hyporigin = "01/01/2018"` and `trackorigin = "01/01/2017"`).
+```{r warning = FALSE}
+#generate hypothetical data for had the birds not moved
+
+#MEF
+a41_hyp <- makeHypoBreed("A41_2018", timing, mig_tracks_sinu, 
+                         trackorigin = as.Date("01/01/2018", 
+                                               format = "%m/%d/%Y"),
+                         hyporigin = as.Date("01/01/2019", 
+                                             format = "%m/%d/%Y"), thin = 8)
+a44_hyp <- makeHypoBreed("A44_2018", timing, mig_tracks_sinu, 
+                         trackorigin = as.Date("01/01/2018", 
+                                               format = "%m/%d/%Y"),
+                         hyporigin = as.Date("01/01/2019", 
+                                             format = "%m/%d/%Y"), thin = 8)
+a43_hyp <- makeHypoBreed("A43_2016", timing, mig_tracks_sinu, 
+                         trackorigin = as.Date("01/01/2016", 
+                                               format = "%m/%d/%Y"),
+                         hyporigin = as.Date("01/01/2017", 
+                                             format = "%m/%d/%Y"), thin = 8)
+cng1_hyp <- makeHypoBreed("CNG1_2018", timing, mig_tracks_sinu, 
+                          trackorigin = as.Date("01/01/2018", 
+                                                format = "%m/%d/%Y"),
+                          hyporigin = as.Date("01/01/2019", 
+                                              format = "%m/%d/%Y"), thin = 8)
+bg5_hyp <- makeHypoBreed("BG5_2019", timing, mig_tracks_sinu, 
+                         trackorigin = as.Date("01/01/2019", 
+                                               format = "%m/%d/%Y"),
+                         hyporigin = as.Date("01/01/2020", 
+                                             format = "%m/%d/%Y"), thin = 8)
+
+#HOT CREEK
+rp15_hyp <- makeHypoBreed("RP15_2018", timing, mig_tracks_sinu, 
+                          trackorigin = as.Date("01/01/2018", 
+                                                format = "%m/%d/%Y"),
+                          hyporigin = as.Date("01/01/2019", 
+                                              format = "%m/%d/%Y"), thin = 8)
+cp11_16_hyp <- makeHypoBreed("CP11_2016", timing, mig_tracks_sinu, 
+                             trackorigin = as.Date("01/01/2016", 
+                                                   format = "%m/%d/%Y"),
+                             hyporigin = as.Date("01/01/2017", 
+                                                 format = "%m/%d/%Y"), thin = 8)
+cp11_18_hyp <- makeHypoBreed("CP11_2018", timing, mig_tracks_sinu, 
+                             trackorigin = as.Date("01/01/2018", 
+                                                   format = "%m/%d/%Y"),
+                             hyporigin = as.Date("01/01/2019", 
+                                                 format = "%m/%d/%Y"), thin = 8)
+cp1_hyp <- makeHypoBreed("CP1_2017", timing, mig_tracks_sinu, 
+                         trackorigin = as.Date("01/01/2017", 
+                                               format = "%m/%d/%Y"),
+                         hyporigin = as.Date("01/01/2018", 
+                                             format = "%m/%d/%Y"), thin = 8)
+
+#UT
+hyp_3489 <- makeHypoBreed("03489_2019", timing, mig_tracks_sinu, 
+                          trackorigin = as.Date("01/01/2019", 
+                                                format = "%m/%d/%Y"),
+                          hyporigin = as.Date("01/01/2020", 
+                                              format = "%m/%d/%Y"), thin = 8)
+hyp_3503 <- makeHypoBreed("03503_2019", timing, mig_tracks_sinu, 
+                          trackorigin = as.Date("01/01/2019", 
+                                                format = "%m/%d/%Y"),
+                          hyporigin = as.Date("01/01/2020", 
+                                              format = "%m/%d/%Y"), thin = 8)
+hyp_3504 <- makeHypoBreed("03504_2019", timing, mig_tracks_sinu, 
+                          trackorigin = as.Date("01/01/2019", 
+                                                format = "%m/%d/%Y"),
+                          hyporigin = as.Date("01/01/2020", 
+                                              format = "%m/%d/%Y"), thin = 8)
+hyp_3387 <- makeHypoBreed("03387_2019", timing, mig_tracks_sinu, 
+                          trackorigin = as.Date("01/01/2019", 
+                                                format = "%m/%d/%Y"), 
+                          hyporigin = as.Date("01/01/2020", 
+                                              format = "%m/%d/%Y"), thin = 8)
+hyp_3495 <- makeHypoBreed("03495_2019", timing, mig_tracks_sinu, 
+                          trackorigin = as.Date("01/01/2019", 
+                                                format = "%m/%d/%Y"), 
+                          hyporigin = as.Date("01/01/2020", 
+                                              format = "%m/%d/%Y"), thin = 8)
+
+#ID
+hyp_3480 <- makeHypoBreed("03480_2019", timing, mig_tracks_sinu, 
+                          trackorigin = as.Date("01/01/2019", 
+                                                format = "%m/%d/%Y"),
+                          hyporigin = as.Date("01/01/2020", 
+                                              format = "%m/%d/%Y"), thin = 8)
+hyp_3482 <- makeHypoBreed("03482_2019", timing, mig_tracks_sinu, 
+                          trackorigin = as.Date("01/01/2019", 
+                                                format = "%m/%d/%Y"),
+                          hyporigin = as.Date("01/01/2020", 
+                                              format = "%m/%d/%Y"), thin = 8)
+hyp_3483 <- makeHypoBreed("03483_2019", timing, mig_tracks_sinu, 
+                          trackorigin = as.Date("01/01/2019", 
+                                                format = "%m/%d/%Y"),
+                          hyporigin = as.Date("01/01/2020", 
+                                              format = "%m/%d/%Y"), thin = 8)
+```
+
+Now we make a new `sf` object of only the hypothetical fixes and again clean out the intermediary objects.
+```{r warning=FALSE}
+#combine hypothetical summer positions
+mig_tracks_hypo <- rbind_sf(plyr::compact(list(a41_hyp, a44_hyp, a43_hyp, 
+                                               cng1_hyp, bg5_hyp,
+                                               
+                                               rp15_hyp, cp11_16_hyp, 
+                                               cp11_18_hyp, cp1_hyp, 
+                                               
+                                               hyp_3489, hyp_3503, hyp_3504, 
+                                               hyp_3387, hyp_3495,
+                                               
+                                               hyp_3480, hyp_3482, hyp_3483)))
+
+rm(a41_hyp, a44_hyp, a43_hyp, cng1_hyp, bg5_hyp, 
+   rp15_hyp, cp11_16_hyp, cp11_18_hyp, cp1_hyp, 
+   hyp_3489, hyp_3503, hyp_3504, hyp_3387, hyp_3495,
+   hyp_3480, hyp_3482, hyp_3483)
+```
+
+
+### Counterfactual winter fixes
+We'll now do the opposite of the above - what if the birds had not migrated south to MX for the winter?
+
+```{r}
+#make interpolated breeding positions for each bird 
+#MEF
+a41_hypo_wint <- makeHypoWint("A41_2018", breed_loc, timing, 
+                              origin = "2018-01-01", thin = 8)
+a44_hypo_wint <- makeHypoWint("A44_2018", breed_loc, timing,  
+                              origin = "2018-01-01", thin = 8)
+a43_hypo_wint <- makeHypoWint("A43_2016", breed_loc, timing,  
+                              origin = "2016-01-01", thin = 8)
+cng1_hypo_wint <- makeHypoWint("CNG1_2018", breed_loc, timing,  
+                               origin = "2018-01-01", thin = 8)
+bg5_hypo_wint <- makeHypoWint("BG5_2019", breed_loc, timing,  
+                              origin = "2019-01-01", thin = 8)
+
+#HOT CREEK
+rp15_hypo_wint <- makeHypoWint("RP15_2018", breed_loc, timing, 
+                               origin = "2018-01-01", thin = 8)
+cp11_16_hypo_wint <- makeHypoWint("CP11_2016", breed_loc, timing,  
+                                  origin = "2016-01-01", thin = 8)
+cp11_18_hypo_wint <- makeHypoWint("CP11_2018", breed_loc, timing,  
+                                  origin = "2018-01-01", thin = 8)
+cp1_hypo_wint <- makeHypoWint("CP1_2017", breed_loc, timing, 
+                              origin = "2017-01-01", thin = 8)
+
+#UT
+hypo_wint_3489 <- makeHypoWint("03489_2019", breed_loc, timing, 
+                               origin = "2019-01-01", thin = 8)
+hypo_wint_3503 <- makeHypoWint("03503_2019", breed_loc, timing, 
+                               origin = "2019-01-01", thin = 8)
+hypo_wint_3504 <- makeHypoWint("03504_2019", breed_loc, timing, 
+                               origin = "2019-01-01", thin = 8)
+hypo_wint_3387 <- makeHypoWint("03387_2019", breed_loc, timing, 
+                               origin = "2019-01-01", thin = 8)
+hypo_wint_3495 <- makeHypoWint("03495_2019", breed_loc, timing, 
+                               origin = "2019-01-01", thin = 8)
+
+#ID
+hypo_wint_3480 <- makeHypoWint("03480_2019", breed_loc, timing, 
+                               origin = "2019-01-01", thin = 8)
+hypo_wint_3482 <- makeHypoWint("03482_2019", breed_loc, timing, 
+                               origin = "2019-01-01", thin = 8)
+hypo_wint_3483 <- makeHypoWint("03483_2019", breed_loc, timing, 
+                               origin = "2019-01-01", thin = 8)
+```
+
+Now we make a new `sf` object of only the hypothetical fixes and again clean out the intermediary objects. We also transform to MODIS projection
+```{r warning=FALSE}
+#combine hypothetical summer positions
+mig_tracks_hypo_wint <- rbind_sf(plyr::compact(list(
+  a41_hypo_wint, a44_hypo_wint,  a43_hypo_wint, cng1_hypo_wint, bg5_hypo_wint,
+  rp15_hypo_wint, cp11_16_hypo_wint, cp11_18_hypo_wint, cp1_hypo_wint, 
+  hypo_wint_3489, hypo_wint_3503, hypo_wint_3504, hypo_wint_3387, hypo_wint_3495,
+  hypo_wint_3480, hypo_wint_3482, hypo_wint_3483)))
+
+#transform into same projection as MODIS data
+mig_tracks_hypo_wint <- st_transform(mig_tracks_hypo_wint, 
+                                     crs = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 
+                                +a=6371007.181 +b=6371007.181 +units=m 
+                                +no_defs")
+
+rm(a41_hypo_wint, a44_hypo_wint, a43_hypo_wint, cng1_hypo_wint, bg5_hypo_wint,
+   rp15_hypo_wint, cp11_16_hypo_wint, cp11_18_hypo_wint, cp1_hypo_wint,
+   hypo_wint_3489, hypo_wint_3503, hypo_wint_3504, hypo_wint_3387, hypo_wint_3495,
+   hypo_wint_3480, hypo_wint_3482, hypo_wint_3483)
+```
+
+#Get Owl Breeding Centroids
+
+```{r}
+#convert breeding locations to sf object and transform to MODIS proj
+breed_loc_sf <- st_as_sf(breed_loc, coords = c("x","y"),  crs = 26913) %>% 
+  st_transform(crs = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 
+                                +a=6371007.181 +b=6371007.181 +units=m 
+                                +no_defs")
+
+#ectract centroids for each study area
+mef_cent <- st_combine(breed_loc_sf[breed_loc_sf$study_area=="MEF",]) %>% 
+  st_centroid()
+hc_cent <- st_combine(breed_loc_sf[breed_loc_sf$study_area=="HC",]) %>% 
+  st_centroid()
+ut_cent <- st_combine(breed_loc_sf[breed_loc_sf$study_area=="UT",]) %>% 
+  st_centroid()
+id_cent <- st_combine(breed_loc_sf[breed_loc_sf$study_area=="ID",]) %>% 
+  st_centroid()
+
+#make sp versions for MODIS_extract
+hc_cent_sp <- as_Spatial(hc_cent)
+hc_cent_sp <- SpatialPointsDataFrame(hc_cent_sp, 
+                                     data.frame(ID = 1:length(hc_cent_sp)))
+
+mef_cent_sp <- as_Spatial(mef_cent)
+mef_cent_sp <- SpatialPointsDataFrame(mef_cent_sp, 
+                                      data.frame(ID = 1:length(mef_cent_sp)))
+
+ut_cent_sp <- as_Spatial(ut_cent)
+ut_cent_sp <- SpatialPointsDataFrame(ut_cent_sp, 
+                                     data.frame(ID = 1:length(ut_cent_sp)))
+
+id_cent_sp <- as_Spatial(id_cent)
+id_cent_sp <- SpatialPointsDataFrame(id_cent_sp, 
+                                     data.frame(ID = 1:length(id_cent_sp)))
+
+#write out to shp for use with MODIStsp
+st_write(mef_cent, "../data/gis/mef_breed.shp", append = F)
+st_write(hc_cent, "../data/gis/hc_cent.shp", append = F)
+st_write(ut_cent, "../data/gis/ut_cent.shp", append = F)
+st_write(id_cent, "../data/gis/id_cent.shp", append = F)
+```
+
+# Load in MODIS Data
+
+We load MODIS data initially through the GUI that accompanies the `MODIStsp` package - option settings from the GUI session are saved out as a .json file for reproducibility.  GUI is called by `MODIStsp(scroll_window = T)`.  Since the initial download has been completed we can simply load and name the raster object we need to work with.
+
+```{r message=FALSE}
+#Load the NDVI raster stack and rename it.
+load("../ndvi_out/VI_16Days_500m_v6/Time_Series/RData/Terra/NDVI/MOD13A1_NDVI_1_2016_209_2020_RData.RData")
+ndvi_ts <- raster_ts 
+
+#Load the NDVI QA layer and rename it
+load("../ndvi_out/VI_16Days_500m_v6/Time_Series/RData/Terra/QA_qual/MOD13A1_QA_qual_1_2016_209_2020_RData.RData")
+ndvi_QA <- raster_ts
+
+
+#updated version of `MODIStsp` package is resulting in errors in the RData file so we make the raster stacks manually
+fnames <- list.files("../new_nt_out/Surf_Temp_Daily_1Km_v6/LST_Night_1km/", full.names = T)
+fnamesQA <- list.files("../new_nt_out/Surf_Temp_Daily_1Km_v6/QAnight_mand/", full.names = T)
+
+x <- list()
+ext <- list() 
+for(i in 1:length(fnames)){
+  x[[i]] <- raster::raster(fnames[i])
+  ext[[i]] <- extent(x[[i]])
+}
+
+check <- c()
+for(i in 2:length(ext)){
+  check[i] <- ext[[i]] == ext[[i-1]]
+}
+
+check
+which(check==F)
+fnames <- fnames[-which(check==F)[1]]
+nt_ts <- raster::stack(fnames)
+
+
+
+x2 <- list()
+ext2 <- list() 
+for(i in 1:length(fnamesQA)){
+  x2[[i]] <- raster::raster(fnamesQA[i])
+  ext2[[i]] <- extent(x2[[i]])
+}
+
+check <- c()
+for(i in 2:length(ext2)){
+  check[i] <- ext2[[i]] == ext2[[i-1]]
+}
+check
+which(check==F)
+fnamesQA <- fnamesQA[-which(check==F)[1]]
+nt_QA <- raster::stack(fnamesQA)
+
+# 
+# #there is missing QA data at index 471 so we'll drop the temp data for that day
+# nt_ts <- nt_ts[[-471]]
+
+#remove the legacy `raster_ts` object just to minimize how many gigantic objects we currently have in ram...
+rm(raster_ts)
+```
+
+Load in HC and MEF long-term NDVI for time-series.
+
+```{r}
+load("../HC_ndvi/VI_16Days_500m_v6/Time_Series/RData/Terra/NDVI/MOD13A1_NDVI_49_2000_1_2020_RData.RData")
+HC_ndvi <- raster_ts
+rm(raster_ts)
+
+load("../MEF_ndvi/VI_16Days_500m_v6/Time_Series/RData/Terra/NDVI/MOD13A1_NDVI_49_2000_1_2020_RData.RData")
+MEF_ndvi <- raster_ts
+rm(raster_ts)
+```
+
+
+# Extract MODIS data for fixes
+
+First we need to set up some timing indices to help link the specific raster layers in the raster stacks to the movement data.
+
+```{r}
+#define start date for weather data (must match start date of MODIS data)
+startdate <- as.Date("01/01/2016", format = "%m/%d/%Y")
+
+#define stop date for weather data (must match stop date of MODIS data)
+stopdate <- as.Date("08/05/2020", format = "%m/%d/%Y")
+
+#make index of dates
+timesteps <- seq(from = startdate, to = stopdate, by = 'day')
+
+#missing MODIS NT data for raster layers 50-58 - remove from index
+missing <- seq(from=as.Date("02/19/2016", format="%m/%d/%Y"), 
+               to=as.Date("02/27/2016", format="%m/%d/%Y"), by = 'day')
+timesteps <- timesteps[!timesteps %in% missing] 
+#also need to remove index 471 that we deleted above
+timesteps <- timesteps[-471]
+
+#create date index for NDVI data (since NDVI data is every 16 days)
+index <- seq(as.Date("2016-01-01"), as.Date("2019-07-27"), by = 16)
+```
+
+## Extract and Process NT
+
+First up, extract the MODIS NT data for each fix.
+
+```{r}
+#extract temps for "real" data
+temps <- sapply(1:nrow(mig_tracks_sinu), getTemp, move_data = mig_tracks_sinu,
+                temp_brick = nt_ts, doy_index = timesteps, QA_brick = nt_QA)
+```
+
+Now we gather all this into a `data.frame` for use in plotting.
+```{r}
+temp_df <- data.frame("temp" = nasaToCelcius(temps), 
+                      "doy" = yday(as.Date(mig_tracks_sinu$date, 
+                                           format = "%y/%m/%d")),
+                      "date" = as.Date(mig_tracks_sinu$date, 
+                                       format = "%y/%m/%d"),
+                      "bird" = mig_tracks_sinu$bird_year)
+```
+
+Now we need to assign individually derived seasons as a factor column to the timing data.
+```{r}
+for(i in 1:nrow(temp_df)) {
+  start_breed <- timing$first_on_terr_doy[timing$bird == temp_df$bird[i]]
+  end_breed <- timing$last_on_terr_doy[timing$bird == temp_df$bird[i]]
+  start_wint <- timing$wint_arr_doy[timing$bird == temp_df$bird[i]]
+  end_wint <- timing$wint_dep_doy[timing$bird == temp_df$bird[i]]
+  if(is.na(start_breed)) {
+    start_breed <- median(na.omit(timing$first_on_terr_doy))}
+  if(is.na(end_breed)) {
+    end_breed <- median(na.omit(timing$last_on_terr_doy))}
+  if(is.na(start_wint)) {
+    start_wint <- median(na.omit(timing$wint_arr_doy))}
+  if(is.na(end_wint)) {
+    end_wint <- median(na.omit(timing$wint_dep_doy))}
+  x <- temp_df$doy[i]
+  if (x >= start_breed & x <= end_breed) { 
+    temp_df$season[i] <- "summer"
+  } else {
+    if (x > end_breed & x < start_wint) { 
+      temp_df$season[i] <- "fall"
+    } else {
+      if (x >= start_wint | x <= end_wint) { 
+        temp_df$season[i] <- "winter"
+      } else {
+        if (x > end_wint & x < start_breed) {
+          temp_df$season[i] <- "spring" 
+        } else {
+          temp_df$season[i] <- "unknown"
+        }
+      }
+    }
+  }
+}
+```
+
+Now create a summary table:
+```{r}
+tempsummary <- temp_df[complete.cases(temp_df),] %>% 
+  group_by(., season, bird) %>%
+  summarise("mu" = mean(temp),
+            "se" = se(temp),
+            "sd" = sd(temp),
+            "mu.CI.l" = bootMuCI(temp)[1],
+            "mu.CI.h" = bootMuCI(temp)[2],
+            "var" = var(temp),
+            "var.ci.l" = varCI(temp)[1],
+            "var.ci.h" = varCI(temp)[2]) %>% 
+  ungroup() %>% 
+  mutate(season = fct_relevel(season, c("summer", "fall", "winter", "spring")))
+
+#reorder the factor levels of `temp_df` to match
+temp_df$season <- fct_relevel(temp_df$season, c("summer", "fall", "winter", "spring"))
+
+#filter some dupliacted rows that are sneaking in...
+temp_df <- temp_df %>% 
+  filter(!duplicated(data.frame(doy = temp_df$doy, date  = temp_df$date, 
+                                bird = temp_df$bird)))
+
+#need to also remove clearly erroneous readings from 7/31/2017
+temp_df <- filter(temp_df, date != "2017-07-31")
+```
+
+
+## Extract and process NDVI 
+```{r}
+#extract NDVI for real data
+ndvi <- sapply(1:nrow(mig_tracks_sinu), getNDVI, move_data = mig_tracks_sinu,
+               ndvi_brick = ndvi_ts, doy_index = index, QA_brick = ndvi_QA)
+
+#rescale ndvi
+ndvi <- ndvi*.0001
+```
+
+Gather into `data.frame`.
+
+```{r}
+ndvi_df <- data.frame("temp" = ndvi, 
+                      "doy" = yday(as.Date(mig_tracks_sinu$date, 
+                                           format = "%y/%m/%d")),
+                      "date" = as.Date(mig_tracks_sinu$date, 
+                                       format = "%y/%m/%d"),
+                      "year" = year(as.Date(mig_tracks_sinu$date, 
+                                            format = "%y/%m/%d")),
+                      "bird" = mig_tracks_sinu$bird_year)
+```
+
+Assign individual based season factor
+```{r}
+for(i in 1:nrow(ndvi_df)) {
+  start_breed <- timing$first_on_terr_doy[timing$bird == ndvi_df$bird[i]]
+  end_breed <- timing$last_on_terr_doy[timing$bird == ndvi_df$bird[i]]
+  start_wint <- timing$wint_arr_doy[timing$bird == ndvi_df$bird[i]]
+  end_wint <- timing$wint_dep_doy[timing$bird == ndvi_df$bird[i]]
+  if(is.na(start_breed)) {
+    start_breed <- median(na.omit(timing$first_on_terr_doy))}
+  if(is.na(end_breed)) {
+    end_breed <- median(na.omit(timing$last_on_terr_doy))}
+  if(is.na(start_wint)) {
+    start_wint <- median(na.omit(timing$wint_arr_doy))}
+  if(is.na(end_wint)) {
+    end_wint <- median(na.omit(timing$wint_dep_doy))}
+  x <- ndvi_df$doy[i]
+  if (x >= start_breed & x <= end_breed) { 
+    ndvi_df$season[i] <- "summer"
+  } else {
+    if (x > end_breed & x < start_wint) { 
+      ndvi_df$season[i] <- "fall"
+    } else {
+      if (x >= start_wint | x <= end_wint) { 
+        ndvi_df$season[i] <- "winter"
+      } else {
+        if (x > end_wint & x < start_breed) {
+          ndvi_df$season[i] <- "spring" 
+        } else {
+          ndvi_df$season[i] <- "unknown"
+        }
+      }
+    }
+  }
+}
+```
+
+Summarize into a table and also filter out some duplicated values being created.
+```{r}
+ndvisummary <- ndvi_df[complete.cases(ndvi_df),] %>% 
+  group_by(., season, bird) %>%
+  summarise("mu" = mean(temp),
+            "se" = se(temp),
+            "sd" = sd(temp),
+            "mu.CI.l" = bootMuCI(temp)[1],
+            "mu.CI.h" = bootMuCI(temp)[2],
+            "var" = var(temp),
+            "var.ci.l" = varCI(temp)[1],
+            "var.ci.h" = varCI(temp)[2]) %>% 
+  ungroup() %>% 
+  mutate(season = fct_relevel(season, c("summer", "fall", "winter", "spring")))
+
+ndvi_df$season <- fct_relevel(ndvi_df$season, c("summer", "fall", "winter", "spring"))
+
+#filter some dupliacted rows that are sneaking in...
+ndvi_df <- ndvi_df %>% 
+  filter(!duplicated(data.frame(doy = ndvi_df$doy, date  = ndvi_df$date, bird = ndvi_df$bird)))
+```
+
+## Simulated Breeding
+
+Extract NT and NDVI as though birds had stayed Mexico to breed.
+
+### Counterfactual NT
+
+```{r}
+#extract temps for "hypothetical" data
+hypo_temps <- sapply(1:nrow(mig_tracks_hypo[mig_tracks_hypo$date < stopdate,]),
+                     getTemp, move_data = mig_tracks_hypo[
+                       mig_tracks_hypo$date < stopdate,], 
+                     temp_brick = nt_ts, 
+                     doy_index = timesteps,
+                     QA_brick = nt_QA)
+```
+
+Gather into `data.frame`.
+
+```{r}
+hypo_temp_df <- data.frame("temp" = nasaToCelcius(hypo_temps), 
+                           "doy" = yday(as.Date(mig_tracks_hypo$date[
+                             mig_tracks_hypo$date < stopdate],
+                             format = "%y/%m/%d")),
+                           "date" = as.Date(mig_tracks_hypo$date[
+                             mig_tracks_hypo$date < stopdate],
+                             format = "%y/%m/%d"),
+                           "bird" = mig_tracks_hypo$bird[
+                             mig_tracks_hypo$date < stopdate])
+```
+
+Assign individual temps:
+```{r}
+for(i in 1:nrow(hypo_temp_df)) {
+  start_breed <- timing$first_on_terr_doy[timing$bird == hypo_temp_df$bird[i]]
+  end_breed <- timing$last_on_terr_doy[timing$bird == hypo_temp_df$bird[i]]
+  start_wint <- timing$wint_arr_doy[timing$bird == hypo_temp_df$bird[i]]
+  end_wint <- timing$wint_dep_doy[timing$bird == hypo_temp_df$bird[i]]
+  if(is.na(start_breed)) {
+    start_breed <- median(na.omit(timing$first_on_terr_doy))}
+  if(is.na(end_breed)) {
+    end_breed <- median(na.omit(timing$last_on_terr_doy))}
+  if(is.na(start_wint)) {
+    start_wint <- median(na.omit(timing$wint_arr_doy))}
+  if(is.na(end_wint)) {
+    end_wint <- median(na.omit(timing$wint_dep_doy))}
+  x <- hypo_temp_df$doy[i]
+  if (x >= start_breed & x <= end_breed) { 
+    hypo_temp_df$season[i] <- "summer"
+  } else {
+    if (x > end_breed & x < start_wint) { 
+      hypo_temp_df$season[i] <- "fall"
+    } else {
+      if (x >= start_wint | x <= end_wint) { 
+        hypo_temp_df$season[i] <- "winter"
+      } else {
+        if (x > end_wint & x < start_breed) {
+          hypo_temp_df$season[i] <- "spring" 
+        } else {
+          hypo_temp_df$season[i] <- "unknown"
+        }
+      }
+    }
+  }
+}
+
+```
+
+Create a summary object as well as a merged `data.frame` that contains both real and counterfactual NT:
+```{r}
+hypotempsummary <- hypo_temp_df[complete.cases(hypo_temp_df),] %>% 
+  group_by(., season, bird) %>%
+  summarise("mu" = mean(temp),
+            "mu.CI.l" = bootMuCI(temp)[1],
+            "mu.CI.h" = bootMuCI(temp)[2],
+            "se" = se(temp),
+            "sd" = sd(temp),
+            "var" = var(temp),
+            "var.ci.l" = varCI(temp)[1],
+            "var.ci.h" = varCI(temp)[2]) %>% 
+  ungroup() %>% 
+  mutate(season = fct_relevel(season, c("summer", "fall", "winter", "spring")))
+
+merge_temps <- rbind(hypotempsummary, tempsummary)
+merge_temps$type <- c(rep("hypo", nrow(hypotempsummary)), 
+                      rep("real", nrow(tempsummary)))
+
+#filter out winter positions and birds with no hypo points
+merge_temps <- merge_temps %>% 
+  filter(season != "winter" & bird != "A43_2016" & bird != "CNG1_2018")
+```
+
+
+### Counterfactual NDVI
+
+```{r}
+#extract ndvi for hypothetical data
+ndvi_hypo <- sapply(1:nrow(mig_tracks_hypo), getNDVI, 
+                    move_data = mig_tracks_hypo, ndvi_brick = ndvi_ts, 
+                    doy_index = index, QA_brick = ndvi_QA)
+
+#rescale
+ndvi_hypo <- ndvi_hypo*.0001
+```
+
+
+Gather into `data.frame`.
+```{r}
+ndvi_hypo_df <- data.frame("temp" = ndvi_hypo, 
+                           "doy" = yday(as.Date(mig_tracks_hypo$date, 
+                                                format = "%y/%m/%d")),
+                           "date" = as.Date(mig_tracks_hypo$date, 
+                                            format = "%y/%m/%d"),
+                           "year" = year(as.Date(mig_tracks_hypo$date, 
+                                                 format = "%y/%m/%d")),
+                           "bird" = mig_tracks_hypo$bird)
+```
+
+Assign individually absed seasons
+```{r}
+#assign individual season to each entry of ndvi_hypo_df
+for(i in 1:nrow(ndvi_hypo_df)) {
+  start_breed <- timing$first_on_terr_doy[timing$bird == ndvi_hypo_df$bird[i]]
+  end_breed <- timing$last_on_terr_doy[timing$bird == ndvi_hypo_df$bird[i]]
+  start_wint <- timing$wint_arr_doy[timing$bird == ndvi_hypo_df$bird[i]]
+  end_wint <- timing$wint_dep_doy[timing$bird == ndvi_hypo_df$bird[i]]
+  if(is.na(start_breed)) {
+    start_breed <- median(na.omit(timing$first_on_terr_doy))}
+  if(is.na(end_breed)) {
+    end_breed <- median(na.omit(timing$last_on_terr_doy))}
+  if(is.na(start_wint)) {
+    start_wint <- median(na.omit(timing$wint_arr_doy))}
+  if(is.na(end_wint)) {
+    end_wint <- median(na.omit(timing$wint_dep_doy))}
+  x <- ndvi_hypo_df$doy[i]
+  if (x >= start_breed & x <= end_breed) { 
+    ndvi_hypo_df$season[i] <- "summer"
+  } else {
+    if (x > end_breed & x < start_wint) { 
+      ndvi_hypo_df$season[i] <- "fall"
+    } else {
+      if (x >= start_wint | x <= end_wint) { 
+        ndvi_hypo_df$season[i] <- "winter"
+      } else {
+        if (x > end_wint & x < start_breed) {
+          ndvi_hypo_df$season[i] <- "spring" 
+        } else {
+          ndvi_hypo_df$season[i] <- "unknown"
+        }
+      }
+    }
+  }
+}
+
+```
+
+Create a summary table and a merged data frame with the "real" fixes.
+
+```{r}
+hypondvisummary <- ndvi_hypo_df[complete.cases(ndvi_hypo_df),] %>% 
+  group_by(., season, bird) %>%
+  summarise("mu" = mean(temp),
+            "se" = se(temp),
+            "sd" = sd(temp),
+            "mu.CI.l" = bootMuCI(temp)[1],
+            "mu.CI.h" = bootMuCI(temp)[2],
+            "var" = var(temp),
+            "var.ci.l" = varCI(temp)[1],
+            "var.ci.h" = varCI(temp)[2]) %>% 
+  ungroup() %>% 
+  mutate(season = fct_relevel(season, c("summer", "fall", "winter", "spring")))
+
+merge_ndvi <- rbind(hypondvisummary, ndvisummary)
+merge_ndvi$type <- c(rep("hypo", nrow(hypondvisummary)), 
+                     rep("real", nrow(ndvisummary)))
+#filter out winter positions and birds with no hypo points
+merge_ndvi <- merge_ndvi %>% 
+  filter(season != "winter" & bird != "A43_2016" & bird != "CNG1_2018")
+```
+
+
+## Simulated Winter
+
+Extract NT and NDVI as though birds had stayed CO for winter
+
+### Counterfactual NT
+
+```{r}
+#extract temps for "hypothetical" data
+hypo_temps_wint <- sapply(1:nrow(mig_tracks_hypo_wint[
+  mig_tracks_hypo_wint$date < stopdate,]),
+  getTemp, move_data = mig_tracks_hypo_wint[
+    mig_tracks_hypo_wint$date < stopdate,], 
+  temp_brick = nt_ts, 
+  doy_index = timesteps,
+  QA_brick = nt_QA)
+```
+
+Gather into `data.frame`.
+
+```{r}
+hypo_temp_wint_df <- data.frame("temp" = nasaToCelcius(hypo_temps_wint), 
+                                "doy" = yday(as.Date(mig_tracks_hypo_wint$date[
+                                  mig_tracks_hypo_wint$date < stopdate],
+                                  format = "%y/%m/%d")),
+                                "date" = as.Date(mig_tracks_hypo_wint$date[
+                                  mig_tracks_hypo_wint$date < stopdate],
+                                  format = "%y/%m/%d"),
+                                "bird" = mig_tracks_hypo_wint$bird[
+                                  mig_tracks_hypo_wint$date < stopdate])
+```
+
+Assign individual temps:
+```{r}
+for(i in 1:nrow(hypo_temp_wint_df)) {
+  start_breed <- timing$first_on_terr_doy[
+    timing$bird == hypo_temp_wint_df$bird[i]]
+  end_breed <- timing$last_on_terr_doy[
+    timing$bird == hypo_temp_wint_df$bird[i]]
+  start_wint <- timing$wint_arr_doy[timing$bird == hypo_temp_wint_df$bird[i]]
+  end_wint <- timing$wint_dep_doy[timing$bird == hypo_temp_wint_df$bird[i]]
+  if(is.na(start_breed)) {
+    start_breed <- median(na.omit(timing$first_on_terr_doy))}
+  if(is.na(end_breed)) {
+    end_breed <- median(na.omit(timing$last_on_terr_doy))}
+  if(is.na(start_wint)) {
+    start_wint <- median(na.omit(timing$wint_arr_doy))}
+  if(is.na(end_wint)) {
+    end_wint <- median(na.omit(timing$wint_dep_doy))}
+  x <- hypo_temp_wint_df$doy[i]
+  if (x >= start_breed & x <= end_breed) { 
+    hypo_temp_wint_df$season[i] <- "summer"
+  } else {
+    if (x > end_breed & x < start_wint) { 
+      hypo_temp_wint_df$season[i] <- "fall"
+    } else {
+      if (x >= start_wint | x <= end_wint) { 
+        hypo_temp_wint_df$season[i] <- "winter"
+      } else {
+        if (x > end_wint & x < start_breed) {
+          hypo_temp_wint_df$season[i] <- "spring" 
+        } else {
+          hypo_temp_wint_df$season[i] <- "unknown"
+        }
+      }
+    }
+  }
+}
+
+```
+
+Create a summary object as well as a merged `data.frame` that contains both real and counterfactual NT:
+```{r}
+hypotempwintsummary <- hypo_temp_wint_df[
+  complete.cases(hypo_temp_wint_df),] %>% 
+  group_by(., season, bird) %>%
+  summarise("mu" = mean(temp),
+            "mu.CI.l" = bootMuCI(temp)[1],
+            "mu.CI.h" = bootMuCI(temp)[2],
+            "se" = se(temp),
+            "sd" = sd(temp),
+            "var" = var(temp),
+            "var.ci.l" = varCI(temp)[1],
+            "var.ci.h" = varCI(temp)[2]) %>% 
+  ungroup() %>% 
+  mutate(season = fct_relevel(season, c("summer", "fall", "winter", "spring")))
+
+merge_temps_wint <- rbind(hypotempwintsummary, tempsummary)
+merge_temps_wint$type <- c(rep("hypo", nrow(hypotempwintsummary)), 
+                           rep("real", nrow(tempsummary)))
+
+#filter out winter positions and birds with no hypo points
+merge_temps_wint <- merge_temps_wint %>%
+  filter(season != "summer" & bird != "A43_2016" & bird != "CNG1_2018")
+```
+
+
+### Counterfactual NDVI
+
+```{r}
+#extract ndvi for hypothetical data
+ndvi_hypo_wint <- sapply(1:nrow(mig_tracks_hypo_wint), getNDVI, 
+                         move_data = mig_tracks_hypo_wint, ndvi_brick = ndvi_ts, 
+                         doy_index = index, QA_brick = ndvi_QA)
+
+#rescale
+ndvi_hypo_wint <- ndvi_hypo_wint*.0001
+```
+
+
+Gather into `data.frame`.
+```{r}
+ndvi_hypo_wint_df <- data.frame("temp" = ndvi_hypo_wint, 
+                                "doy" = yday(as.Date(mig_tracks_hypo_wint$date, 
+                                                     format = "%y/%m/%d")),
+                                "date" = as.Date(mig_tracks_hypo_wint$date, 
+                                                 format = "%y/%m/%d"),
+                                "year" = year(as.Date(mig_tracks_hypo_wint$date, 
+                                                      format = "%y/%m/%d")),
+                                "bird" = mig_tracks_hypo_wint$bird)
+```
+
+Assign individually based seasons
+```{r}
+#assign individual season to each entry of ndvi_hypo_df
+for(i in 1:nrow(ndvi_hypo_wint_df)) {
+  start_breed <- timing$first_on_terr_doy[
+    timing$bird == ndvi_hypo_wint_df$bird[i]]
+  end_breed <- timing$last_on_terr_doy[
+    timing$bird == ndvi_hypo_wint_df$bird[i]]
+  start_wint <- timing$wint_arr_doy[timing$bird == ndvi_hypo_wint_df$bird[i]]
+  end_wint <- timing$wint_dep_doy[timing$bird == ndvi_hypo_wint_df$bird[i]]
+  if(is.na(start_breed)) {
+    start_breed <- median(na.omit(timing$first_on_terr_doy))}
+  if(is.na(end_breed)) {
+    end_breed <- median(na.omit(timing$last_on_terr_doy))}
+  if(is.na(start_wint)) {
+    start_wint <- median(na.omit(timing$wint_arr_doy))}
+  if(is.na(end_wint)) {
+    end_wint <- median(na.omit(timing$wint_dep_doy))}
+  x <- ndvi_hypo_wint_df$doy[i]
+  if (x >= start_breed & x <= end_breed) { 
+    ndvi_hypo_wint_df$season[i] <- "summer"
+  } else {
+    if (x > end_breed & x < start_wint) { 
+      ndvi_hypo_wint_df$season[i] <- "fall"
+    } else {
+      if (x >= start_wint | x <= end_wint) { 
+        ndvi_hypo_wint_df$season[i] <- "winter"
+      } else {
+        if (x > end_wint & x < start_breed) {
+          ndvi_hypo_wint_df$season[i] <- "spring" 
+        } else {
+          ndvi_hypo_wint_df$season[i] <- "unknown"
+        }
+      }
+    }
+  }
+}
+
+```
+
+Create a summary table and a merged data frame with the "real" fixes.
+
+```{r}
+hypondviwintsummary <- ndvi_hypo_wint_df[
+  complete.cases(ndvi_hypo_wint_df),] %>% 
+  group_by(., season, bird) %>%
+  summarise("mu" = mean(temp),
+            "se" = se(temp),
+            "sd" = sd(temp),
+            "mu.CI.l" = bootMuCI(temp)[1],
+            "mu.CI.h" = bootMuCI(temp)[2],
+            "var" = var(temp),
+            "var.ci.l" = varCI(temp)[1],
+            "var.ci.h" = varCI(temp)[2]) %>% 
+  ungroup() %>% 
+  mutate(season = fct_relevel(season, c("summer", "fall", "winter", "spring")))
+
+merge_ndvi_wint <- rbind(hypondviwintsummary, ndvisummary)
+merge_ndvi_wint$type <- c(rep("hypo", nrow(hypondviwintsummary)), 
+                          rep("real", nrow(ndvisummary)))
+#filter out winter positions and birds with no hypo points
+merge_ndvi_wint <- merge_ndvi_wint %>% 
+  filter(season != "summer" & bird != "A43_2016" & bird != "CNG1_2018")
+```
+
+# Breeding season conditions at transitions
+
+## Min Temp
+
+### Hot Creek Study Area
+First load in land-based weather station data for Conejos County, CO
+
+```{r}
+#read in minimum temperature data from Conejos County, CO
+conejos_tmin <- read.csv("C://Users/syanc/Google Drive/worldclim/1908397.csv")
+```
+
+Now we need to convert temp readings to Celsius
+```{r}
+#convert to C
+conejos_tmin$TMIN <- (conejos_tmin$TMIN-32)*(5/9)
+```
+
+We'll extract the data from the Platoro site only and then add some date columns.
+```{r}
+#pull platoro station data only
+platoro <- conejos_tmin[conejos_tmin$NAME == "PLATORO, CO US",]
+
+#convert dates
+platoro$DATE <- as.Date(platoro$DATE)
+
+#create doy only column
+platoro$doy <- yday(platoro$DATE)
+
+#create year factor
+platoro$y <- as.factor(year(platoro$DATE))
+```
+
+
+### Manitou Experimental Forest
+
+Read in data from weather station at Florisant, CO.
+
+```{r}
+#read in minimum temp from Florisant, CO
+flor_tmin <- read.csv("C://Users/syanc/Google Drive/worldclim/1909067.csv")
+```
+
+Conver readings to Celsius and add date columns.
+
+```{r}
+#convert to C
+flor_tmin$TMIN <- (flor_tmin$TMIN-32)*(5/9)
+
+#convert dates
+flor_tmin$DATE <- as.Date(flor_tmin$DATE)
+
+#create doy column
+flor_tmin$doy <- yday(flor_tmin$DATE)
+
+#create year factor
+flor_tmin$y <- as.factor(year(flor_tmin$DATE))
+```
+
+## NDVI
+
+### Hot Creek
+
+Pull time series of NDVI values for Hot Creek breeding centroid dating back to 1999/2000
+Still need to add QA filter her
+```{r}
+HC_ndvi_ts <- MODIStsp_extract(in_rts = HC_ndvi, sp_object = hc_cent_sp, 
+                               out_format = "dframe")
+HC_ndvi_ts$`1` <- HC_ndvi_ts$`1`*.0001
+HC_ndvi_ts$ndvi <- HC_ndvi_ts$`1`
+HC_ndvi_ts$doy <- yday(HC_ndvi_ts$date)
+```
+
+### MEF
+
+Pull time series of NDVI values for MEF breeding centroid dating back to 1999/2000
+Still need to add QA filter here
+```{r}
+MEF_ndvi_ts <- MODIStsp_extract(in_rts = MEF_ndvi, sp_object = mef_cent_sp, 
+                                out_format = "dframe")
+MEF_ndvi_ts$`1` <- MEF_ndvi_ts$`1`*.0001
+MEF_ndvi_ts$ndvi <- MEF_ndvi_ts$`1`
+MEF_ndvi_ts$doy <- yday(MEF_ndvi_ts$date)
+```
+
+
+# Worldclim Data
+
+Read in worldclim bioclimatic data as a raster stack
+```{r}
+rlist <- list.files(path="../wc2.0_30s_bio/", pattern = "tif$", 
+                    full.names = TRUE)
+wclim <- stack(rlist)
+```
+
+Convert to data.frames for ggplot.
+```{r}
+#temperature seasonality
+wclim_4_crop <- crop(wclim[[4]], extent(matrix(c(-110, -90, 40, 10), 
+                                               byrow = T, nrow = 2)))
+```
+
+#eBird occurence data
+
+Load in eBird data
+```{r}
+ebd_flow <- read_ebd("../ebd_flaowl_relAug-2019/ebd_flaowl_relAug-2019.txt")
+
+```
+
+
+Create DOY and year variables
+```{r}
+#doy var
+ebd_flow$obs_doy <- yday(ebd_flow$observation_date)
+#create year variable
+ebd_flow$obs_year <- year(ebd_flow$observation_date)
+```
+
+Create season variable (and convert to factor).  USe the transition dates created above that are the most conservative possible relative to winter - i.e., if any birds could have been migrating we'll call it migration - so we minimize the winter period so that we are VERY confident that records assigned to winter are truly winter residency period.
+```{r}
+# create season factor variable
+ebd_flow$season <- sapply(ebd_flow$obs_doy, FUN = assignSeasons, 
+                          start_breed = start_breed, end_breed = end_breed,
+                          start_wint = start_wint, end_wint = end_wint)
+
+# change season to factor and adjust level orders
+ebd_flow$season <- factor(ebd_flow$season, 
+                          levels = c("winter", "spring", "summer", "fall", 
+                                     "unknown"))
+```
+
+Make spatial version of ebd data
+```{r}
+ebd_sf <- st_as_sf(ebd_flow,
+                   coords = c("longitude", "latitude"),
+                   crs = 4326) 
+```
+
+
+# Save
+
+Save out the items we need to be loaded in separate analysis script:
+
+```{r}
+save(ndvi_df, temp_df, 
+     hypo_temp_df, ndvi_hypo_df, 
+     temps, 
+     hypo_temps,
+     hypo_temp_wint_df, ndvi_hypo_wint_df,
+     hypo_temps_wint, ndvi_hypo_wint,
+     flor_tmin, platoro,
+     mig_tracks_line,
+     tempsummary, ndvisummary,
+     hypotempsummary, hypondvisummary,
+     # hc_time, mef_time,
+     # timing,
+     # MEF_ndvi, MEF_ndvi_ts,
+     # HC_ndvi, HC_ndvi_ts,
+     file = "extract_112020.Rdata")
+```
