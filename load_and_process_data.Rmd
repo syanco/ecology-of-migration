@@ -622,22 +622,29 @@ rm(a41_hypo_wint, a44_hypo_wint, a43_hypo_wint, cng1_hypo_wint, bg5_hypo_wint,
 
 ```{r}
 #convert breeding locations to sf object and transform to MODIS proj
-breed_loc_sf <- st_as_sf(breed_loc, coords = c("x","y"),  crs = 26913) %>% 
-  st_transform(crs = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 
-                                +a=6371007.181 +b=6371007.181 +units=m 
-                                +no_defs")
+breed_loc_sf <- st_as_sf(breed_loc, coords = c("x","y"),  crs = 26913) 
 
 #ectract centroids for each study area
 mef_cent <- st_combine(breed_loc_sf[breed_loc_sf$study_area=="MEF",]) %>% 
   st_centroid() %>% 
-  st_as_sf()
+  st_transform(crs = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 
+                                +a=6371007.181 +b=6371007.181 +units=m 
+                                +no_defs")
 hc_cent <- st_combine(breed_loc_sf[breed_loc_sf$study_area=="HC",]) %>% 
-  st_centroid() %>% 
-  st_as_sf()
+  st_centroid()%>% 
+  st_transform(crs = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 
+                                +a=6371007.181 +b=6371007.181 +units=m 
+                                +no_defs")
 ut_cent <- st_combine(breed_loc_sf[breed_loc_sf$study_area=="UT",]) %>% 
-  st_centroid()
+  st_centroid()%>% 
+  st_transform(crs = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 
+                                +a=6371007.181 +b=6371007.181 +units=m 
+                                +no_defs")
 id_cent <- st_combine(breed_loc_sf[breed_loc_sf$study_area=="ID",]) %>% 
-  st_centroid()
+  st_centroid()%>% 
+  st_transform(crs = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 
+                                +a=6371007.181 +b=6371007.181 +units=m 
+                                +no_defs")
 
 #make sp versions for MODIS_extract
 hc_cent_sp <- as_Spatial(hc_cent)
@@ -1335,67 +1342,42 @@ merge_ndvi_wint <- merge_ndvi_wint %>%
 
 ## Min Temp
 
-### Hot Creek Study Area
-First load in land-based weather station data for Conejos County, CO
 
 ```{r}
-#read in minimum temperature data from Conejos County, CO
-conejos_tmin <- read.csv("C://Users/syanc/Google Drive/worldclim/1908397.csv")
+co_temp <- read.csv("../data/co_temp.csv")
+idut_temp <- read.csv("../data/ut_id_temp.csv")
+
+comb_temp <- rbind(co_temp, idut_temp)
 ```
 
-Now we need to convert temp readings to Celsius
+Convert temp readings to Celsius
 ```{r}
 #convert to C
-conejos_tmin$TMIN <- (conejos_tmin$TMIN-32)*(5/9)
-```
-
-We'll extract the data from the Platoro site only and then add some date columns.
-```{r}
-#pull platoro station data only
-platoro <- conejos_tmin[conejos_tmin$NAME == "PLATORO, CO US",]
+comb_temp$tmin_c <- (comb_temp$TMIN-32)*(5/9)
 
 #convert dates
-platoro$DATE <- as.Date(platoro$DATE)
+comb_temp$DATE <- as.Date(comb_temp$DATE)
 
 #create doy only column
-platoro$doy <- yday(platoro$DATE)
+comb_temp$doy <- yday(comb_temp$DATE)
 
 #create year factor
-platoro$y <- as.factor(year(platoro$DATE))
+comb_temp$y <- as.factor(year(comb_temp$DATE))
 ```
 
 
-### Manitou Experimental Forest
-
-Read in data from weather station at Florisant, CO.
-
+Break into separate study areas
 ```{r}
-#read in minimum temp from Florisant, CO
-flor_tmin <- read.csv("C://Users/syanc/Google Drive/worldclim/1909067.csv")
+comb_temp_split <- split(comb_temp, comb_temp$NAME)
 ```
 
-Conver readings to Celsius and add date columns.
-
-```{r}
-#convert to C
-flor_tmin$TMIN <- (flor_tmin$TMIN-32)*(5/9)
-
-#convert dates
-flor_tmin$DATE <- as.Date(flor_tmin$DATE)
-
-#create doy column
-flor_tmin$doy <- yday(flor_tmin$DATE)
-
-#create year factor
-flor_tmin$y <- as.factor(year(flor_tmin$DATE))
-```
 
 ## NDVI
 
 ### Hot Creek
 
 Pull time series of NDVI values for Hot Creek breeding centroid dating back to 1999/2000
-Still need to add QA filter her
+#Still need to add QA filter here
 ```{r}
 HC_ndvi_ts <- MODIStsp_extract(in_rts = HC_ndvi, sf_object = hc_cent, 
                                out_format = "dframe")
@@ -1409,7 +1391,7 @@ HC_ndvi_ts$doy <- yday(HC_ndvi_ts$date)
 Pull time series of NDVI values for MEF breeding centroid dating back to 1999/2000
 Still need to add QA filter here
 ```{r}
-MEF_ndvi_ts <- MODIStsp_extract(in_rts = MEF_ndvi, sp_object = mef_cent_sp, 
+MEF_ndvi_ts <- MODIStsp_extract(in_rts = MEF_ndvi, sf_object = mef_cent, 
                                 out_format = "dframe")
 MEF_ndvi_ts$`1` <- MEF_ndvi_ts$`1`*.0001
 MEF_ndvi_ts$ndvi <- MEF_ndvi_ts$`1`

@@ -875,7 +875,7 @@ max(pred_plat$fit)
 
 ```
 
-PLot models with transition dates
+Plot models with transition dates
 
 ```{r fig.width=3.5, fig.height=2}
 (#plot HC min temps (GAM) with departures and arrivals
