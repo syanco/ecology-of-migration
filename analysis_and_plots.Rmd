@@ -1,0 +1,1107 @@
+---
+title: "Nich dynamics and ecological origins of migration - Analysis & Plots"
+author: "Scott Yanco"
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+output: pdf_document
+---
+
+# Initialization
+
+Required libraries:
+```{r message=FALSE}
+#plotting
+library(ggplot2)
+library(ggthemes)
+library(grid)
+library(gridExtra)
+# library(NineteenEightyR)
+library(viridis)
+library(extrafont)
+library(RColorBrewer)
+
+#data wrangling
+library(lubridate)
+library(tidyverse)
+
+#spatial
+library(sf)
+library(sp)
+library(rnaturalearth)
+library(rnaturalearthdata)
+library(raster)
+
+#modeling
+library(nlme)
+library(glmmTMB)
+library(ggeffects)
+library(lattice)
+library(tidymv)
+library(mgcv)
+library(brms)
+library(fpp2)
+```
+
+Load data from previous script (rather than source data load and processing script which is very time consuming).
+
+```{r}
+load("../out/extract_2021-01-20.Rdata")
+source("./functions.R")
+```
+
+# Figure S1 - Track Map
+
+Make a map with all the tracks combined.  First we load in some background layers.
+
+```{r}
+#get world map of country boundaries 
+world <- ne_countries(scale = "medium", returnclass = "sf")
+#get US map of state boundaries
+usa_states <- ne_states(returnclass = "sf", 
+                        country = "united states of america")
+#get MX map of state boundaries
+mx_states <- ne_states(returnclass = "sf", country = "mexico")
+
+#get US borders
+us <- ne_countries(country = "united states of america", returnclass = "sp")
+#get MX borders
+mx <- ne_countries(country = "mexico", returnclass = "sp")
+#get Guat. borders
+guat <- ne_countries(country = "guatemala", returnclass = "sp")
+#"sf" version of Guat.
+guat_sf <- ne_countries(country = "guatemala", returnclass = "sf")
+
+## Load Hypso Data ##
+hypso <- raster("../data/gis/HYP_50M_SR_W/HYP_50M_SR_W/HYP_50M_SR_W.tif")
+
+#crop hypso data to make processing faster
+hypso <- crop(hypso, extent(matrix(c(-120, -90, 45, 10), byrow = T, nrow = 2)))
+
+#get US hypso
+hypso_us <- mask(hypso, us)
+#get MX hypso
+hypso_mx <- mask(hypso, mx)
+#get Guat hypso
+hypso_guat <- mask(hypso, guat)
+
+#convert hypsos to spatial points data frames
+hypso_us_spdf <- as(hypso_us, "SpatialPixelsDataFrame")
+hypso_mx_spdf <- as(hypso_mx, "SpatialPixelsDataFrame")
+hypso_guat_spdf <- as(hypso_guat, "SpatialPixelsDataFrame")
+
+#convert hypsos to data.frames (for ggplot2)
+hypso_us_df <- as.data.frame(hypso_us_spdf)
+hypso_mx_df <- as.data.frame(hypso_mx_spdf)
+hypso_guat_df <- as.data.frame(hypso_guat_spdf)
+
+```
+
+
+```{r}
+# The palette with black:
+cbbPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7")
+
+(trackmap <- ggplot() +
+  geom_tile(data = hypso_us_df, aes(x=x, y=y, fill = HYP_50M_SR_W), 
+            alpha = .7) +
+  geom_tile(data = hypso_mx_df, aes(x=x, y=y, fill = HYP_50M_SR_W), 
+            alpha = .7) +
+  geom_tile(data = hypso_guat_df, aes(x=x, y=y, fill = HYP_50M_SR_W), 
+            alpha = .7) + 
+  scale_fill_gradient2(low = "#01665E", mid = "#F5F5F5", high = "#8C510A", 
+                       midpoint = 175) +
+  geom_sf(data = world, fill = NA) +
+  # geom_sf(data = mig_tracks_wint_sf[mig_tracks_wint_sf$season == "winter",], 
+  #         inherit.aes = F, aes(group = bird_year, color  = bird_year), 
+  #         size = 2) +
+  geom_sf(data = mig_tracks_line, inherit.aes = F, 
+          aes(group = bird_year, color = study_area), 
+          size = 1, alpha = .75) +
+  # scale_color_manual(values = cbbPalette) + 
+  #ggtitle("Winter GPS Points Below 24 Degrees") +
+  coord_sf(xlim = c(-120, -90), ylim = c(14, 45), expand = F) +
+  theme_minimal() +
+  theme(legend.position = "none", 
+        # axis.text = element_text(family = "Arial Rounded MT Bold")
+        ) +
+  xlab("") +
+  ylab(""))
+
+ggsave("../figures/trackmap.png", trackmap)
+```
+
+# Experienced NT
+
+## Models
+
+```{r}
+get_prior(bf(temp ~ 0 + season + (1|bird) + ar(time = date,gr = bird, cov = T), 
+             sigma ~ 0 +season, family = gaussian()), data = temp_df)
+
+fit_temp <- brm(bf(temp ~ 0 + season + (1|bird) + ar(time = date,gr = bird, cov = T), 
+             sigma ~ 0 + season, family = gaussian()), data = temp_df, 
+             chains = 4, iter = 10000, getOption("mc.cores", 3))
+fit_temp
+```
+
+### Model performance checks:
+
+Look at residuals and autocorrelation
+```{r}
+resid <- resid(fit_temp, type = "pearson")[, "Estimate"]
+n <- length(resid)
+resid[-1] <- resid[-1] - (resid[-n] * mean(as.matrix(fit_temp)[,
+    "ar[1]"]))
+fit <- fitted(fit_temp)[, "Estimate"]
+
+ggplot() + geom_point(data = NULL, aes(y = resid, x = fit))
+plot(acf(resid, lag = 40))
+```
+
+
+### Summarize
+
+```{r}
+sum_temp <- summary(fit_temp)
+
+sum_temp$fixed
+
+(temp_mod_df <- data.frame(param = c(rep("mu", 4), rep("sigma", 4)),
+                          est = sum_temp$fixed[,1],
+                          CI_l = sum_temp$fixed[,3],
+                          CI_h = sum_temp$fixed[,4],
+                          season = rep(c("summer", "fall", "winter", "spring"),
+                                       2)))
+```
+
+## Plots
+Reorder some factors for plotting
+```{r}
+temp_df$season <- fct_relevel(temp_df$season, 
+                              c("spring", "summer", "fall", "winter"))
+tempsummary$season <- fct_relevel(tempsummary$season, 
+                                  c("spring", "summer", "fall", "winter"))
+# tempmod$season <- fct_relevel(tempmod$season, 
+#                               c("spring", "breeding", "fall", "winter"))
+# tempvar$season <- fct_relevel(tempvar$season,
+#                               c("spring", "summer", "fall", "winter"))
+```
+
+Make a common legend:
+```{r fig.width=7, fig.height=0.5}
+legend.plot <- ggplot(data = temp_df, 
+                      aes(x = doy, y = temp, color = season)) +
+  geom_point() +
+  scale_color_brewer(palette = "Set1") +
+  labs(color = "Season") +
+  theme_few() +
+  theme(legend.position = "left",
+        legend.direction = "horizontal")
+
+legend <- g_legend(legend.plot)
+grid.arrange(legend)
+```
+
+Now plot panel A - raw temps.
+```{r fig.width=7, fig.height=3}
+#### Experienced temps ####
+(rawtemps <- ggplot() +
+  geom_point(data = temp_df, 
+             aes(x = doy, y = temp, colour = season), size = 1.5) +
+  scale_color_brewer(palette = "Set1") +
+  annotate(geom="text", x=1, y=20, label="A", size = 7) +
+  ylab(expression(paste("NT (",degree, "C)"))) +
+  xlab("Day of Year") +
+  labs(color = "Season") +
+  theme_few() +
+  theme(legend.position = "none"))
+```
+
+Plot panel B - estimated means from the model
+```{r fig.width=3.5, fig.height=3}
+temp_mod_df[temp_mod_df$param == "mu",]
+(meantemps <- ggplot(temp_mod_df[temp_mod_df$param == "mu",]) +
+  geom_point(aes(x = season, y = est, colour = season), size = 1.5) +
+  geom_errorbar(aes(x = season, ymax = CI_h, ymin = CI_l, colour = season),
+  width =.5, size = .5) +
+  annotate(geom="text", x=4, y=14.7, label="B", size = 7) +
+  # scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
+  scale_colour_brewer(palette = "Set1") +
+  ylim(0, 15) +
+  ylab(expression(paste("Mean NT (",degree, "C)"))) +
+  xlab("Season") + 
+  theme_few() +
+  theme(legend.position = "none"))
+```
+
+```{r fig.width=3.5, fig.height=3}
+temp_mod_df[temp_mod_df$param == "sigma",]
+(SDtemps <- ggplot(temp_mod_df[temp_mod_df$param == "sigma",]
+) +
+  geom_point(aes(x = season, y = est, color = season), size = 1.5) +
+  geom_errorbar(aes(x = season, ymin = CI_l, ymax = CI_h, color = season),
+                width = .5, size = .5) +
+  scale_colour_brewer(palette = "Set1") +
+  scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
+  annotate(geom="text", x=4.2, y=7, label="C", size = 7) +
+  ylab(expression(paste("Std. Dev. NT (",degree, "C)"))) +
+  xlab("Season") + 
+  theme_few() +
+  theme(legend.position = "none"))
+
+```
+
+### Arrange the plots into single figure
+
+```{r fig.height=10, fig.width=7}
+gl <- list(rawtemps, legend, meantemps, SDtemps)
+
+ntfig <- arrangeGrob(
+  grobs = gl,
+  heights = unit(c(3,.5, 3), c("in", "in", "in")),
+  #  widths = c(2, 1, 1),
+  layout_matrix = rbind(c(1, 1),
+                        c(2, 2),
+                        c(3, 4))
+)
+
+ggsave("../figures/nT_fig.pdf", ntfig)
+ggsave("../figures/nT_fig.png", ntfig)
+
+```
+
+
+# Experienced NDVI
+
+## Models
+
+Build the linear model that includes:  
+- Random intercept by bird;
+- First-order auto-regressive covariance structure
+- Heterogeneous variance by season
+- AND models NDVI as beta distributed
+
+Need to make a factior date for this AR1
+```{r}
+ndvi_df$date_factor <- factor(ndvi_df$date)
+ndvi_df$bird <- factor(ndvi_df$bird)
+```
+
+
+First fit the models.
+```{r}
+get_prior(bf(ndvi ~ season + (1|bird) + ar(time = date,gr = bird, cov = T), 
+             phi ~ season, family = Beta()), data = ndvi_df)
+
+fit_ndvi <- brm(bf(ndvi ~ season + (1|bird) + ar(time = date, gr = bird, cov = T), 
+             phi ~ season, family = Beta()), data = ndvi_df, 
+             chains = 4, iter = 1000, cores = getOption("mc.cores", 3),
+             control = list(adapt_delta = 0.95))
+fit_ndvi
+```
+### Model performance checks
+
+```{r}
+resid <- resid(fit_ndvi, type = "pearson")[, "Estimate"]
+n <- length(resid)
+resid[-1] <- resid[-1] - (resid[-n] * mean(as.matrix(fit_ndvi)[,
+    "ar[1]"]))
+fit <- fitted(fit_ndvi)[, "Estimate"]
+
+ggplot() + geom_point(data = NULL, aes(y = resid, x = fit))
+plot(acf(resid, lag = 40))
+```
+
+
+### Summarize
+
+```{r}
+sum_ndvi <- summary(fit_ndvi)
+
+sum_ndvi$fixed
+
+(ndvi_mod_df <- data.frame(param = c("mu", "phi", "mu", "mu", "mu", 
+                                     "phi", "phi", "phi"),
+                          est = sum_ndvi$fixed[,1],
+                          CI_l = sum_ndvi$fixed[,3],
+                          CI_h = sum_ndvi$fixed[,4],
+                          season = c("summer", "summer", "fall", "winter", 
+                                         "spring","fall", "winter", "spring"),
+                          est_2 = NA,
+                          CI_l_2 = NA,
+                          CI_h_2 = NA))
+
+#hacky code to deal with offsets - remove once model refitted through intercept
+for (i in 3:nrow(ndvi_mod_df)) {
+  if(ndvi_mod_df$param[i] == "mu"){
+    ndvi_mod_df$est_2[i] <- ndvi_mod_df$est[i] + ndvi_mod_df$est[1]
+    ndvi_mod_df$CI_l_2[i] <- ndvi_mod_df$CI_l[i] + ndvi_mod_df$CI_l[1]
+    ndvi_mod_df$CI_h_2[i] <- ndvi_mod_df$CI_h[i] + ndvi_mod_df$CI_h[1]
+
+  }  else {
+    ndvi_mod_df$est_2[i] <- ndvi_mod_df$est[i] + ndvi_mod_df$est[2]
+    ndvi_mod_df$CI_l_2[i] <- ndvi_mod_df$CI_l[i] + ndvi_mod_df$CI_l[2]
+    ndvi_mod_df$CI_h_2[i] <- ndvi_mod_df$CI_h[i] + ndvi_mod_df$CI_h[2]
+  }
+}
+
+ndvi_mod_df$est_2[1] <- ndvi_mod_df$est[1]
+ndvi_mod_df$est_2[2] <- ndvi_mod_df$est[2]
+
+ndvi_mod_df$CI_l_2[1] <- ndvi_mod_df$CI_l[1]
+ndvi_mod_df$CI_l_2[2] <- ndvi_mod_df$CI_l[2]
+
+ndvi_mod_df$CI_h_2[1] <- ndvi_mod_df$CI_h[1]
+ndvi_mod_df$CI_h_2[2] <- ndvi_mod_df$CI_h[2]
+
+```
+
+## Plots
+Reorder some factors for plotting
+```{r}
+ndvi_mod_df$season <- fct_relevel(ndvi_mod_df$season, 
+                              c("spring", "summer", "fall", "winter"))
+ndvi_df$season <- fct_relevel(ndvi_df$season, 
+                                  c("spring", "summer", "fall", "winter"))
+# ndvimod$season <- fct_relevel(ndvimod$season, 
+#                               c("spring", "breeding", "fall", "winter"))
+# ndvivar$season <- fct_relevel(ndvivar$season,
+#                               c("spring", "summer", "fall", "winter"))
+```
+
+Now plot panel A - raw NDVI.
+```{r fig.width=7, fig.height=3}
+#### Experienced temps ####
+(rawndvi <- ggplot() +
+  geom_point(data = ndvi_df, 
+             aes(x = doy, y = ndvi, colour = season),
+             size = 1.5) +
+  annotate(geom="text", x=1, y=.95, label="A", size = 7) +
+  scale_color_brewer(palette = "Set1") +
+  ylim(0,1) +
+  ylab("NDVI") +
+  xlab("Day of Year") +
+  labs(color = "Season") +
+  theme_few() +
+  theme(legend.position = "none"))
+```
+
+Plot panel B - estimated means from the model
+# CHANGE EST_2 TO EST AFTER REFITTING MODEL THROUGH INTERECPT
+```{r fig.width=3.5, fig.height=3}
+(meanndvi <- ggplot(ndvi_mod_df[ndvi_mod_df$param == "mu",]) +
+  geom_point(aes(x = season, y = est_2, colour = season), size = 1.5) +
+  geom_errorbar(aes(x = season, ymax = CI_h_2, ymin = CI_l_2, colour = season), 
+                width =.5, size = .5) +
+  scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
+  scale_colour_brewer(palette = "Set1") +
+  annotate(geom="text", x=4.2, y=.95, label="B", size = 7) +
+  # ylim(0, 1) +
+  ylab("Mean NDVI") +
+  xlab("Season") + 
+  theme_few() +
+  theme(legend.position = "none"))
+```
+
+Plot Panel C - strata-specific variances
+```{r fig.width=3.5, fig.height=3}
+(SDndvi <- ggplot(ndvi_mod_df[ndvi_mod_df$param == "phi",]) +
+  geom_point(aes(x = season, y = est_2, color = season), size = 1.5) +
+  geom_errorbar(aes(x = season, ymin = CI_l_2, ymax = CI_h_2, color = season),
+                width = .5, size = .5) +
+  scale_colour_brewer(palette = "Set1") +
+  scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
+  annotate(geom="text", x=4.2, y=.5, label="C", size = 7) +
+  ylab("Std. Dev. NDVI") +
+  xlab("Season") + 
+  theme_few() +
+  theme(legend.position = "none"))
+
+```
+
+### Arrange into single
+```{r fig.height=10, fig.width=7}
+gl2 <- list(rawndvi, legend, meanndvi, SDndvi)
+
+ntfig <- arrangeGrob(
+  grobs = gl2,
+  heights = unit(c(3,.5, 3), c("in", "in", "in")),
+  #  widths = c(2, 1, 1),
+  layout_matrix = rbind(c(1, 1),
+                        c(2, 2),
+                        c(3, 4))
+)
+
+ggsave("../figures/ndvi_fig.pdf", plot = ntfig)
+ggsave("../figures/ndvi_fig.png", ntfig)
+```
+
+#Counterfactual Breeding
+## Counterfactual NT
+
+```{r}
+hypo_temp_df$season <- fct_relevel(hypo_temp_df$season, 
+                                   c("spring", "summer", "fall", "winter"))
+merge_temps$season <- fct_relevel(merge_temps$season, 
+                                  c("spring", "summer", "fall", "winter"))
+```
+
+
+Make a plot of raw temps with raw hypo temps.
+```{r fig.width=3.5, fig.height=3}
+(rawhypoNT <- ggplot() +
+   geom_point(data = temp_df, 
+              aes(x = doy, y = temp), color = "lightgray", alpha = .7, 
+              shape = 17) +
+   geom_point(data = hypo_temp_df,
+              aes(x = doy, y = temp, color = season)) +
+   scale_color_brewer(palette = "Set1") +
+   ylab(expression(paste("NT (",degree, "C)"))) +
+   xlab("Day of Year") +
+   theme_few() +
+   xlim(0, 366) +
+   ylim(-15, 30) +
+   theme(legend.position = "none"))
+```
+```{r}
+ggsave("../figures/rawNT.png", rawhypoNT, width = 3.5, height = 3)
+```
+
+```{r fig.width=3.5, fig.height=3}
+(meanhypoNT <- ggplot() +
+   
+   #real points and error bars
+   geom_errorbar(data = merge_temps[merge_temps$type == "real",],
+                 aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, group = bird), 
+                 width = .5, size = .5, color = "grey44",
+                 position=position_dodge(width=0.9)) +
+   geom_point(data = merge_temps[merge_temps$type == "real",],
+              aes(x = season, y = mu, group = bird),
+              shape = 17, size = 1.5, color = "grey44",
+              position=position_dodge(width=0.9)) +
+   
+   #simulated points and bars
+   geom_errorbar(data = merge_temps[merge_temps$type == "hypo",],
+                 aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, 
+                     color = season, group = bird),
+                 width = .5, size = .5, position=position_dodge(width=0.9)) +
+   geom_point(data = merge_temps[merge_temps$type == "hypo",],
+              aes(x = season, y = mu, color = season, group = bird),
+              size = 1.5, position=position_dodge(width=0.9)) +
+   
+   scale_color_brewer(palette = "Set1", 
+                      name = "Season") +
+   # scale_x_discrete(labels = c("Spring", "Summer", "Fall")) +
+   theme_few()+
+   theme(axis.ticks.x = element_blank(),
+         legend.position = "none",
+         strip.text = element_blank()) +
+   ylab(expression(paste("NT (",degree, "C)"))) +
+   xlab("Season") +
+   facet_grid(cols = vars(season), scales = "free"))
+```
+Get mean pairwise difference:
+```{r}
+mean_pair_NT <- merge_temps %>% 
+  pivot_wider(id_cols = bird, names_from = c(season, type), values_from = mu)
+
+#spring
+t.test(mean_pair_NT$spring_hypo, mean_pair_NT$spring_real, paired = T)
+
+#summer
+t.test(mean_pair_NT$summer_hypo, mean_pair_NT$summer_real, paired = T)
+
+#fall
+t.test(mean_pair_NT$fall_hypo, mean_pair_NT$fall_real, paired = T)
+```
+
+```{r}
+ggsave("../figures/muNT.png", meanhypoNT, width = 3.5, height = 3)
+```
+
+## Counterfactual NDVI
+
+```{r}
+ndvi_hypo_df$season <- fct_relevel(ndvi_hypo_df$season, 
+                                   c("spring", "summer", "fall", "winter"))
+merge_ndvi$season <- fct_relevel(merge_ndvi$season, 
+                                 c("spring", "summer", "fall", "winter"))
+```
+
+
+Make a plot of raw temps with raw hypo temps.
+```{r fig.width=3.5, fig.height=3}
+(rawhypoNDVI <- ggplot() +
+   geom_point(data = ndvi_df, 
+              aes(x = doy, y = ndvi), color = "lightgray", alpha = .7, 
+              shape = 17) +
+   geom_point(data = ndvi_hypo_df[ndvi_hypo_df$season != "winter",],
+              aes(x = doy, y = ndvi, color = season)) +
+   scale_color_brewer(palette = "Set1") +
+   ylab("NDVI") +
+   xlab("Day of Year") +
+   theme_few() +
+   xlim(0, 366) +
+   ylim(0,1) +
+   theme(legend.position = "none"))
+```
+```{r}
+ggsave("../figures/rawNDVI.png", rawhypoNDVI, width = 3.5, height = 3)
+```
+
+
+```{r fig.width=3.5, fig.height=3}
+season.names <- c("Spring", "Summer", "Fall")
+names(season.names) <- c("spring", "summer", "fall")
+
+(meanhypoNDVI <- ggplot() +
+    
+    #real points and error bars
+    geom_errorbar(data = merge_ndvi[merge_ndvi$type == "real",],
+                  aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, group = bird), 
+                  width = .3, size = 1, color = "black", alpha = 0.4,
+                  position=position_dodge(width=0.9)) +
+    geom_point(data = merge_ndvi[merge_ndvi$type == "real",],
+               aes(x = season, y = mu, group = bird),
+               shape = 17, size = 1.5, color = "black", alpha = 0.4,
+               position=position_dodge(width=0.9)) +
+    
+    #simulated points and bars
+    geom_errorbar(data = merge_ndvi[merge_ndvi$type == "hypo",],
+                  aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, 
+                      color = season, group = bird),
+                  width = .3, size = 1, position=position_dodge(width=0.9)) +
+    geom_point(data = merge_ndvi[merge_ndvi$type == "hypo",],
+               aes(x = season, y = mu, color = season, group = bird),
+               size = 1.5, position=position_dodge(width=0.9)) +
+    
+    scale_color_brewer(palette = "Set1", 
+                       name = "Season") +
+    # scale_x_discrete(labels = c("Spring", "Summer", "Fall")) +
+    theme_few()+
+    theme(axis.ticks.x = element_blank(),
+          legend.position = "none", strip.placement = "bottom", 
+          plot.title = element_text(hjust=0),
+          strip.text = element_blank()) +
+    ylab(expression(paste("NT (",degree, "C)"))) +
+    xlab("Season") +
+    ylab("NDVI") +
+    facet_grid(cols = vars(season), scales = "free"))
+```
+```{r}
+ggsave("../figures/muNDVI.png", meanhypoNDVI, width = 3.5, height = 3)
+```
+
+Get mean pairwise difference:
+```{r}
+mean_pair_ndvi <- merge_ndvi %>% 
+  pivot_wider(id_cols = bird, names_from = c(season, type), values_from = mu)
+
+#spring
+t.test(mean_pair_ndvi$spring_hypo, mean_pair_ndvi$spring_real, paired = T)
+
+#summer
+t.test(mean_pair_ndvi$summer_hypo, mean_pair_ndvi$summer_real, paired = T)
+
+#fall
+t.test(mean_pair_ndvi$fall_hypo, mean_pair_ndvi$fall_real, paired = T)
+```
+
+## Common legend
+Extract common legend.
+
+```{r fig.width=7, fig.height = 0.5}
+hypSummLeg <- ggplot(merge_temps) +
+  geom_point(data = merge_temps, aes(x = season, color = season, y = mu,
+                                     alpha = type, shape = type)) +
+  geom_point(data = merge_temps_wint, aes(x = season, color = season, y = mu,
+                                          alpha = type, shape = type)) + 
+  scale_color_brewer(palette = "Set1", 
+                     labels = c("Spring", "Summer", "Fall", "Winter"),
+                     name = "Season") +
+  scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
+  scale_alpha_manual(values = c(1, 0.3), 
+                     labels = c("Simulated", "Experienced"),
+                     name = "Data Type") +
+  scale_shape_discrete(labels = c("Simulated", "Experienced"),
+                       name = "Data Type") +
+  theme_few() +
+  theme(legend.box = "horizontal", legend.position = "bottom")
+
+
+legend <- g_legend(hypSummLeg)
+grid.arrange(legend)
+```
+```{r}
+ggsave("../figures/legend.png", legend, width = 7, height = 0.5)
+```
+#Counterfactual Winter
+
+## Counterfactual NT
+```{r}
+hypo_temp_wint_df$season <- fct_relevel(hypo_temp_wint_df$season, 
+                                        c("spring", "summer", "fall", "winter"))
+merge_temps_wint$season <- fct_relevel(merge_temps_wint$season, 
+                                       c("spring", "summer", "fall", "winter"))
+```
+
+Make a plot of raw temps with raw hypo temps.
+```{r}
+(rawhypoNTwint <- ggplot() +
+   geom_point(data = temp_df, 
+              aes(x = doy, y = temp), color = "lightgray", alpha = .7, 
+              shape = 17) +
+   geom_point(data = hypo_temp_wint_df[hypo_temp_wint_df$season != "summer",],
+              aes(x = doy, y = temp, color = season)) +
+   scale_color_manual(values = c("#E41A1C", "#4DAF4A", "#984EA3"))+
+   ylab(expression(paste("NT (",degree, "C)"))) +
+   xlab("Day of Year") +
+   theme_few() +
+   xlim(0, 366) +
+   theme(legend.position = "none"))
+```
+
+```{r}
+ggsave("../figures/Hypo_Wint/rawNT.png", rawhypoNTwint, width = 3.5, height = 3)
+```
+
+```{r}
+(meanhypoNTwint <- ggplot() +
+   
+   #real points and error bars
+   geom_errorbar(data = merge_temps_wint[merge_temps_wint$type == "real",],
+                 aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, group = bird), 
+                 width = .5, size = .5, color = "grey44",
+                 position=position_dodge(width=0.9)) +
+   geom_point(data = merge_temps_wint[merge_temps_wint$type == "real",],
+              aes(x = season, y = mu, group = bird),
+              shape = 17, size = 1.5, color = "grey44",
+              position=position_dodge(width=0.9)) +
+   
+   #simulated points and bars
+   geom_errorbar(data = merge_temps_wint[merge_temps_wint$type == "hypo",],
+                 aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, 
+                     color = season, group = bird),
+                 width = .5, size = .5, position=position_dodge(width=0.9)) +
+   geom_point(data = merge_temps_wint[merge_temps_wint$type == "hypo",],
+              aes(x = season, y = mu, color = season, group = bird),
+              size = 1.5, position=position_dodge(width=0.9)) +
+   
+   scale_color_manual(values = c("#E41A1C", "#4DAF4A", "#984EA3"))+
+   #scale_x_discrete(labels = c("Spring", "Summer", "Fall")) +
+   # scale_alpha_manual(values = c(1, 0.3), 
+   #                    labels = c("Simulated", "Experienced"),
+   #                    name = "Data Type") +
+   # scale_shape_discrete(labels = c("Simulated", "Experienced"),
+   #                      name = "Data Type") +
+   theme_few()+
+   theme(axis.ticks.x = element_blank(),
+         legend.position = "none", strip.placement = "bottom", 
+         plot.title = element_text(hjust=0),
+         strip.text = element_blank()) +
+   ylab(expression(paste("NT (",degree, "C)"))) +
+   xlab("Season") +
+   ylab(expression(paste("NT (",degree, "C)"))) +
+   
+   facet_grid(cols = vars(season), scales = "free"))
+```
+```{r}
+ggsave("../figures/Hypo_Wint/meanNT.png", meanhypoNTwint, width = 3.5, height = 3)
+```
+Extract legend.
+
+```{r}
+hypNTlegwint <- ggplot(merge_temps_wint) +
+  geom_point(data = merge_temps_wint,
+             aes(x = season, color = season, y = mu, 
+                 shape = type, alpha = type)) +
+  geom_errorbar(
+    aes(x = season, color = season, ymax = mu.CI.h, ymin = mu.CI.l,
+        alpha = type),
+    width = .3) +
+  scale_color_brewer(palette = "Set1", 
+                     name = "Season") +
+  scale_x_discrete(labels = c("Winter", "Spring", "Fall")) +
+  scale_alpha_manual(values = c(1, 0.3), 
+                     labels = c("Simulated", "Experienced"),
+                     name = "Data Type") +
+  scale_shape_discrete(labels = c("Simulated", "Experienced"),
+                       name = "Data Type") +
+  theme_few()
+
+
+legend <- g_legend(hypNTlegwint)
+grid.arrange(legend)
+```
+
+### Arrange into single
+```{r fig.height=10, fig.width=7}
+gl5 <- list(rawhypoNTwint, meanhypoNTwint, legend)
+
+(hypontwintfig <- arrangeGrob(
+  grobs = gl5,
+  heights = unit(c(3, 5), c("in", "in")),
+  #  widths = c(2, 1, 1),
+  layout_matrix = rbind(c(1, 3),
+                        c(2, 2))
+))
+
+ggsave("hypo_nt_wint_fig.pdf", hypontwintfig)
+ggsave("hypo_nt_wint_fig.png", hypontwintfig)
+```
+
+
+## Counterfactual NDVI
+```{r}
+ndvi_hypo_wint_df$season <- fct_relevel(ndvi_hypo_wint_df$season, 
+                                        c("spring", "summer", "fall", "winter"))
+merge_ndvi_wint$season <- fct_relevel(merge_ndvi_wint$season, 
+                                      c("spring", "summer", "fall", "winter"))
+```
+
+Make a plot of raw temps with raw hypo temps.
+```{r}
+(rawhypoNDVIwint <- ggplot() +
+   geom_point(data = ndvi_df, 
+              aes(x = doy, y = temp), color = "lightgray", alpha = .7, 
+              shape = 17) +
+   geom_point(data = ndvi_hypo_wint_df[ndvi_hypo_wint_df$season != "summer",],
+              aes(x = doy, y = temp, color = season)) +
+   scale_color_manual(values = c("#E41A1C", "#4DAF4A", "#984EA3"))+
+   ylab("NDVI") +
+   xlab("Day of Year") +
+   theme_few() +
+   xlim(0, 366) +
+   theme(legend.position = "none"))
+```
+
+```{r}
+ggsave("../figures/Hypo_Wint/rawNNDVI.png", rawhypoNDVIwint, width = 3.5, height = 3)
+```
+
+```{r}
+(meanhypoNDVIwint <- ggplot() +
+   
+   #real points and error bars
+   geom_errorbar(data = merge_ndvi_wint[merge_ndvi_wint$type == "real",],
+                 aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, group = bird), 
+                 width = .5, size = .5, color = "grey44",
+                 position=position_dodge(width=0.9)) +
+   geom_point(data = merge_ndvi_wint[merge_ndvi_wint$type == "real",],
+              aes(x = season, y = mu, group = bird),
+              shape = 17, size = 1.5, color = "grey44",
+              position=position_dodge(width=0.9)) +
+   
+   #simulated points and bars
+   geom_errorbar(data = merge_ndvi_wint[merge_ndvi_wint$type == "hypo",],
+                 aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, 
+                     color = season, group = bird),
+                 width = .5, size = .5, position=position_dodge(width=0.9)) +
+   geom_point(data = merge_ndvi_wint[merge_ndvi_wint$type == "hypo",],
+              aes(x = season, y = mu, color = season, group = bird),
+              size = 1.5, position=position_dodge(width=0.9)) +
+   
+   scale_color_manual(values = c("#E41A1C", "#4DAF4A", "#984EA3"))+
+   theme_few()+
+   theme(axis.ticks.x = element_blank(),
+         legend.position = "none", strip.placement = "bottom", 
+         plot.title = element_text(hjust=0),
+         strip.text = element_blank()) +
+   ylab("NDVI") +
+   xlab("Season") +
+   facet_grid(cols = vars(season), scales = "free"))
+```
+```{r}
+ggsave("../figures/Hypo_Wint/meanNDVI.png", meanhypoNDVIwint, width = 3.5, height = 3)
+```
+Extract legend.
+
+```{r}
+hypNDVIlegwint <- ggplot(merge_ndvi_wint) +
+  geom_point(aes(x = season, color = season, y = mu, 
+                 shape = type, alpha = type)) +
+  geom_errorbar(aes(x = season, color = season, ymax = mu.CI.h, ymin = mu.CI.l,
+                    alpha = type),
+                width = .3) +
+  scale_color_brewer(palette = "Set1", 
+                     name = "Season") +
+  scale_x_discrete(labels =  c("Winter", "Spring", "Fall")) +
+  scale_alpha_manual(values = c(1, 0.3), 
+                     labels = c("Simulated", "Experienced"),
+                     name = "Data Type") +
+  scale_shape_discrete(labels = c("Simulated", "Experienced"),
+                       name = "Data Type") +
+  theme_few()
+
+
+legend <- g_legend(hypNDVIlegwint)
+grid.arrange(legend)
+```
+
+### Arrange into single
+```{r fig.height=10, fig.width=7}
+gl6 <- list(rawhypoNDVIwint, meanhypoNDVIwint, legend)
+
+(hypondviwintfig <- arrangeGrob(
+  grobs = gl6,
+  heights = unit(c(3, 5), c("in", "in")),
+  #  widths = c(2, 1, 1),
+  layout_matrix = rbind(c(1, 3),
+                        c(2, 2))
+))
+
+ggsave("hypo_ndvi_wint_fig.pdf", hypondviwintfig)
+ggsave("hypo_ndvi_wint_fig.png", hypondviwintfig)
+```
+
+# Breeding Season Transitions
+
+## Min temp
+
+First build GAMs of minimum daily  temps
+```{r}
+#build GAM of temp for local weather stations (Platoro-HC, Florissant-MEF)
+fm_flor <- gam(TMIN ~ s(doy), data = flor_tmin)
+fm_plat <- gam(TMIN ~ s(doy), data = platoro)
+
+summary(fm_flor)
+summary(fm_plat)
+#extract fitted values of gams
+pred_flor <- predict_gam(fm_flor, length_out = 366)
+pred_plat <- predict_gam(fm_plat, length_out = 366)
+```
+
+```{r}
+#extract fitted temp value that matches median departure/arrival dates
+
+#HC
+(hc_dep <- pred_plat$fit[pred_plat$doy == median(na.omit(hc_time$departure))])
+(hc_arr <- pred_plat$fit[pred_plat$doy == median(na.omit(hc_time$arrival))])
+(hc_dif <- hc_dep-hc_arr)
+```
+```{r}
+(mef_dep <- pred_flor$fit[pred_flor$doy == median(na.omit(mef_time$departure))])
+(mef_arr <- pred_flor$fit[pred_flor$doy == median(na.omit(mef_time$arrival))])
+(mef_dif <- mef_dep-mef_arr)
+
+max(pred_flor$fit) - min(pred_flor$fit)
+max(pred_plat$fit) - min(pred_plat$fit)
+max(pred_flor$fit)
+max(pred_plat$fit)
+
+```
+
+PLot models with transition dates
+
+```{r fig.width=3.5, fig.height=2}
+(#plot HC min temps (GAM) with departures and arrivals
+hc_plot <- ggplot() +
+  geom_ribbon(data = pred_plat, 
+              aes(ymin = (fit-se.fit), ymax = (fit+se.fit), x = doy), 
+              color = "gray", alpha = 0.25) +
+  geom_line(data = pred_plat, aes(x = doy, y = fit), inherit.aes = F) +
+  geom_vline(data = hc_time, aes(xintercept = departure), color = "red") +
+  geom_vline(data = hc_time,
+             aes(xintercept = median(na.omit(departure))), size = 1) +
+  geom_vline(data = hc_time, aes(xintercept = arrival), color = "red") +
+  geom_vline(data = hc_time, 
+             aes(xintercept = median(na.omit(arrival))), size = 1) +
+  geom_hline(yintercept = hc_dep, linetype = "twodash", color = "blue") +
+  geom_hline(yintercept = hc_arr, linetype = "twodash", color = "purple") +
+  xlab("Day of Year") +
+  ylab("Temp (C)") +
+  ylim(-20,10) +
+  #geom_text(aes(x = 55, y = 8, label = "Conejos County, CO")) +
+  theme_few())
+
+#plot MEF min temps (GAM) with departures and arrivals
+(mef_plot <- ggplot() +
+  geom_ribbon(data = pred_flor, 
+              aes(ymin = (fit-se.fit), ymax = (fit+se.fit), x = doy), 
+              color = "gray", alpha = 0.25) +
+  geom_line(data = pred_flor, aes(x = doy, y = fit), inherit.aes = F) +
+  geom_vline(data = mef_time, aes(xintercept = departure), color = "red") +
+  geom_vline(data = mef_time,
+             aes(xintercept = median(departure)), size = 1) +
+  geom_vline(data = mef_time, aes(xintercept = arrival), color = "red") +
+  geom_vline(data = mef_time,
+             aes(xintercept = median(na.omit(arrival))), size = 1) +
+  geom_hline(yintercept = mef_dep, linetype = "twodash", color = "blue") +
+  geom_hline(yintercept = mef_arr, linetype = "twodash", color = "purple") +
+  xlab("Day of Year") +
+  ylab("Temp (C)") +
+  ylim(-20,10) +
+  #geom_text(aes(x = 50, y = 8, label = "Teller County, CO")) +
+  theme_few())
+
+# #combine plots
+# CO_temps <- arrangeGrob(mef_plot, hc_plot)
+# ggsave("breed_temps.png", CO_temps)
+```
+
+## NDVI
+
+First build GAMs of NDVI
+```{r}
+#build GAM
+fm_HC_ndvi <- gam(ndvi ~ s(doy), data = HC_ndvi_ts)
+fm_MEF_ndvi <- gam(ndvi ~ s(doy), data = MEF_ndvi_ts)
+
+
+#extract fitted values of gams
+pred_HC_ndvi <- predict_gam(fm_HC_ndvi, values = list(doy = 1:366))
+pred_MEF_ndvi <- predict_gam(fm_MEF_ndvi, values = list(doy = 1:366))
+
+
+```
+
+```{r}
+#extract fitted temp value that matches median departure/arrival dates
+
+#HC
+(hc_dep_ndvi <- pred_HC_ndvi$fit[pred_HC_ndvi$doy == 
+                                   median(na.omit(hc_time$departure))])
+(hc_arr_ndvi <- pred_HC_ndvi$fit[pred_HC_ndvi$doy == 
+                                   median(na.omit(hc_time$arrival))])
+(hc_dif_ndvi <- hc_dep_ndvi-hc_arr_ndvi)
+
+#MEF
+(mef_dep_ndvi <- pred_MEF_ndvi$fit[pred_MEF_ndvi$doy ==
+                                     median(na.omit(mef_time$departure))])
+(mef_arr_ndvi <- pred_MEF_ndvi$fit[pred_MEF_ndvi$doy == 
+                                     median(na.omit(mef_time$arrival))])
+(mef_dif_ndvi <- mef_dep_ndvi-mef_arr_ndvi)
+
+#total range of NDVI across the year
+max(pred_MEF_ndvi$fit) - min(pred_MEF_ndvi$fit)
+max(pred_HC_ndvi$fit) - min(pred_HC_ndvi$fit)
+max(pred_MEF_ndvi$fit)
+max(pred_HC_ndvi$fit)
+```
+
+Plot it!
+```{r fig.width=3.5, fig.height=2}
+#plot HC NDVI (GAM) with departures and arrivals
+(hc_ndvi_plot <- ggplot() +
+  geom_ribbon(data = pred_HC_ndvi, 
+              aes(ymin = (fit-se.fit), ymax = (fit+se.fit), x = doy), 
+              color = "gray", alpha = 0.25) +
+  geom_line(data = pred_HC_ndvi, aes(x = doy, y = fit), inherit.aes = F) +
+  geom_vline(data = hc_time, aes(xintercept = departure), color = "red") +
+  geom_vline(data = hc_time,
+             aes(xintercept = median(na.omit(departure))), size = 1) +
+  geom_vline(data = hc_time, aes(xintercept = arrival), color = "red") +
+  geom_vline(data = hc_time, 
+             aes(xintercept = median(na.omit(arrival))), size = 1) +
+  geom_hline(yintercept = hc_dep_ndvi, linetype = "twodash", color = "blue") +
+  geom_hline(yintercept = hc_arr_ndvi, linetype = "twodash", color = "purple") +
+  xlab("Day of Year") +
+  ylab("NDVI") +
+  ylim(0,0.6) +
+  #geom_text(aes(x = 55, y = 8, label = "Conejos County, CO")) +
+  theme_few())
+```
+
+```{r fig.width=3.5, fig.height=2}
+#plot MEF NDVI (GAM) with departures and arrivals
+(mef_ndvi_plot <- ggplot() +
+  geom_ribbon(data = pred_MEF_ndvi, 
+              aes(ymin = (fit-se.fit), ymax = (fit+se.fit), x = doy), 
+              color = "gray", alpha = 0.25) +
+  geom_line(data = pred_MEF_ndvi, aes(x = doy, y = fit), inherit.aes = F) +
+  geom_vline(data = mef_time, aes(xintercept = departure), color = "red") +
+  geom_vline(data = mef_time,
+             aes(xintercept = median(na.omit(departure))), size = 1) +
+  geom_vline(data = mef_time, aes(xintercept = arrival), color = "red") +
+  geom_vline(data = mef_time, 
+             aes(xintercept = median(na.omit(arrival))), size = 1) +
+  geom_hline(yintercept = mef_dep_ndvi, linetype = "twodash", color = "blue") +
+  geom_hline(yintercept = mef_arr_ndvi, linetype = "twodash", color = "purple") +
+  xlab("Day of Year") +
+  ylab("NDVI") +
+  ylim(0,0.6) +
+  #geom_text(aes(x = 55, y = 8, label = "Conejos County, CO")) +
+  theme_few())
+
+```
+
+## Combine Plots
+
+```{r fig.width=8, fig.height=5}
+gl_phen <- list(hc_plot, mef_plot, hc_ndvi_plot, mef_ndvi_plot)
+
+(hypontwintfig <- arrangeGrob(
+  grobs = gl_phen,
+  #heights = unit(c(3, 3), c("in", "in")),
+  #  widths = c(2, 1, 1),
+  layout_matrix = rbind(c(1, 3),
+                        c(2, 4))
+))
+
+ggsave("../figures/breed_phen.pdf", hypontwintfig)
+ggsave("../figures/breed_phen.png", hypontwintfig)
+```
+
+
+# Winter distribution and seasonality
+
+Extract winter observations and then remove duplicated entries (i.e. identical geometries)
+```{r}
+#filter to only winter records
+ebd_wint <- ebd_sf[ebd_sf$season == "winter",]
+#remove duplicated identical geometries
+ebd_wint_U <- ebd_wint[!duplicated(ebd_wint$geometry),]
+#still leaving some minor differences in geom for the one bird at South padre 
+#island reported by a million birders.  Remove all but one manually
+ebd_wint_U <- ebd_wint_U[-c(28:37),]
+```
+
+Plot worldclim seasonality with eBird winter distributions
+
+```{r}
+#winter ebird map
+(ebd_wint <- ggplot() +
+   #pol boundaries
+   geom_sf(data = world) +
+   geom_sf(data = usa_states) +
+   geom_sf(data = mx_states) +
+
+   #wordclim seasons
+   layer_spatial(data=wclim_4_crop, alpha=0.8) +
+   scale_fill_viridis(name = 
+                        expression(paste("SD(", bar(T)[monthly], ") X 100"))) +
+   
+   #eBird obs
+   geom_sf(data = ebd_wint_U, inherit.aes = F,
+           size = 1) +
+   #themes, etc.
+   coord_sf(xlim = c(-110, -90), ylim = c(10, 40), expand = F) +
+   #geom_text(aes(x=-110, y = 50, label = "eBird Winter Observations")) +
+   theme_few() +
+   theme(legend.position = "bottom") +
+   xlab("Longitude") +
+   ylab("Latitude"))
+
+ggsave("../figures/winter_worldclim_ebd.png")
+```
+
+Get worldclim value for each observation.
+
+```{r}
+season <- raster::extract(x = wclim_4_crop, y = ebd_wint_U)
+
+y <- density(na.omit(season), n = 2^12)
+wint_season <- data.frame(season = y$x, dens = y$y)
+
+```
+
+Density plot
+
+```{r}
+ggplot(wint_season) +
+  geom_segment(aes(x = season, y = dens, xend = season, yend = 0, color = season))+ 
+  scale_fill_viridis(name = expression(paste("SD(", bar(T)[monthly], ") X 100")),
+                     limits = c(0,1200)) +
+  theme_few() +
+  theme(legend.position = "none")
+```
+
