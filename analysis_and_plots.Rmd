@@ -174,6 +174,12 @@ sum_temp$fixed
 ```
 
 ## Plots
+Create 4-color palette: 
+```{r}
+pal <- c("#4daf4a", "#e41a1c", "#984ea3", "#377eb8")
+```
+
+
 Reorder some factors for plotting
 ```{r}
 temp_df$season <- fct_relevel(temp_df$season, 
@@ -191,7 +197,7 @@ Make a common legend:
 legend.plot <- ggplot(data = temp_df, 
                       aes(x = doy, y = temp, color = season)) +
   geom_point() +
-  scale_color_brewer(palette = "Set1") +
+  scale_color_manual(values = pal) +
   labs(color = "Season") +
   theme_few() +
   theme(legend.position = "left",
@@ -207,8 +213,8 @@ Now plot panel A - raw temps.
 (rawtemps <- ggplot() +
   geom_point(data = temp_df, 
              aes(x = doy, y = temp, colour = season), size = 1.5) +
-  scale_color_brewer(palette = "Set1") +
-  annotate(geom="text", x=1, y=20, label="A", size = 7) +
+  scale_color_manual(values = pal) +
+  annotate(geom="text", x=1, y=19, label="A", size = 7) +
   ylab(expression(paste("NT (",degree, "C)"))) +
   xlab("Day of Year") +
   labs(color = "Season") +
@@ -219,13 +225,14 @@ Now plot panel A - raw temps.
 Plot panel B - estimated means from the model
 ```{r fig.width=3.5, fig.height=3}
 temp_mod_df[temp_mod_df$param == "mu",]
+
 (meantemps <- ggplot(temp_mod_df[temp_mod_df$param == "mu",]) +
   geom_point(aes(x = season, y = est, colour = season), size = 1.5) +
   geom_errorbar(aes(x = season, ymax = CI_h, ymin = CI_l, colour = season),
   width =.5, size = .5) +
-  annotate(geom="text", x=4, y=14.7, label="B", size = 7) +
+  annotate(geom="text", x=4.2, y=14.7, label="B", size = 7) +
   # scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
-  scale_colour_brewer(palette = "Set1") +
+  scale_colour_manual(values = pal) +
   ylim(0, 15) +
   ylab(expression(paste("Mean NT (",degree, "C)"))) +
   xlab("Season") + 
@@ -240,9 +247,9 @@ temp_mod_df[temp_mod_df$param == "sigma",]
   geom_point(aes(x = season, y = est, color = season), size = 1.5) +
   geom_errorbar(aes(x = season, ymin = CI_l, ymax = CI_h, color = season),
                 width = .5, size = .5) +
-  scale_colour_brewer(palette = "Set1") +
+  scale_colour_manual(values = pal) +
   scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
-  annotate(geom="text", x=4.2, y=7, label="C", size = 7) +
+  annotate(geom="text", x=4.2, y=1.8, label="C", size = 7) +
   ylab(expression(paste("Std. Dev. NT (",degree, "C)"))) +
   xlab("Season") + 
   theme_few() +
@@ -376,7 +383,7 @@ Now plot panel A - raw NDVI.
              aes(x = doy, y = ndvi, colour = season),
              size = 1.5) +
   annotate(geom="text", x=1, y=.95, label="A", size = 7) +
-  scale_color_brewer(palette = "Set1") +
+  scale_color_manual(values = pal) +
   ylim(0,1) +
   ylab("NDVI") +
   xlab("Day of Year") +
@@ -393,7 +400,7 @@ Plot panel B - estimated means from the model
   geom_errorbar(aes(x = season, ymax = CI_h_2, ymin = CI_l_2, colour = season), 
                 width =.5, size = .5) +
   scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
-  scale_colour_brewer(palette = "Set1") +
+  scale_colour_manual(values = pal) +
   annotate(geom="text", x=4.2, y=.95, label="B", size = 7) +
   # ylim(0, 1) +
   ylab("Mean NDVI") +
@@ -408,7 +415,7 @@ Plot Panel C - strata-specific variances
   geom_point(aes(x = season, y = est_2, color = season), size = 1.5) +
   geom_errorbar(aes(x = season, ymin = CI_l_2, ymax = CI_h_2, color = season),
                 width = .5, size = .5) +
-  scale_colour_brewer(palette = "Set1") +
+  scale_colour_manual(values = pal) +
   scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
   annotate(geom="text", x=4.2, y=.5, label="C", size = 7) +
   ylab("Std. Dev. NDVI") +
@@ -435,6 +442,12 @@ ggsave("../figures/ndvi_fig.pdf", plot = ntfig)
 ggsave("../figures/ndvi_fig.png", ntfig)
 ```
 
+## Save Model Objects 
+```{r}
+save(fit_ndvi, fit_temp, file = paste0("../out/model_fits_", Sys.Date(), ".Rdata"))
+```
+
+
 #Counterfactual Breeding
 ## Counterfactual NT
 
@@ -442,6 +455,8 @@ ggsave("../figures/ndvi_fig.png", ntfig)
 hypo_temp_df$season <- fct_relevel(hypo_temp_df$season, 
                                    c("spring", "summer", "fall", "winter"))
 merge_temps$season <- fct_relevel(merge_temps$season, 
+                                  c("spring", "summer", "fall", "winter"))
+paired_temps$season <- fct_relevel(paired_temps$season, 
                                   c("spring", "summer", "fall", "winter"))
 ```
 
@@ -454,7 +469,7 @@ Make a plot of raw temps with raw hypo temps.
               shape = 17) +
    geom_point(data = hypo_temp_df,
               aes(x = doy, y = temp, color = season)) +
-   scale_color_brewer(palette = "Set1") +
+   scale_color_manual(values = pal) +
    ylab(expression(paste("NT (",degree, "C)"))) +
    xlab("Day of Year") +
    theme_few() +
@@ -463,32 +478,32 @@ Make a plot of raw temps with raw hypo temps.
    theme(legend.position = "none"))
 ```
 ```{r}
-ggsave("../figures/rawNT.png", rawhypoNT, width = 3.5, height = 3)
+ggsave("../figures/hyp_summer/rawNT.png", rawhypoNT, width = 3.5, height = 3)
 ```
 
 ```{r fig.width=3.5, fig.height=3}
 (meanhypoNT <- ggplot() +
    
    #real points and error bars
-   geom_errorbar(data = merge_temps[merge_temps$type == "real",],
+   geom_errorbar(data = paired_temps[paired_temps$type == "real",],
                  aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, group = bird), 
                  width = .5, size = .5, color = "grey44",
                  position=position_dodge(width=0.9)) +
-   geom_point(data = merge_temps[merge_temps$type == "real",],
+   geom_point(data = paired_temps[paired_temps$type == "real",],
               aes(x = season, y = mu, group = bird),
               shape = 17, size = 1.5, color = "grey44",
               position=position_dodge(width=0.9)) +
    
    #simulated points and bars
-   geom_errorbar(data = merge_temps[merge_temps$type == "hypo",],
+   geom_errorbar(data = paired_temps[paired_temps$type == "hypo",],
                  aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, 
                      color = season, group = bird),
                  width = .5, size = .5, position=position_dodge(width=0.9)) +
-   geom_point(data = merge_temps[merge_temps$type == "hypo",],
+   geom_point(data = paired_temps[paired_temps$type == "hypo",],
               aes(x = season, y = mu, color = season, group = bird),
               size = 1.5, position=position_dodge(width=0.9)) +
    
-   scale_color_brewer(palette = "Set1", 
+   scale_color_manual(values = pal, 
                       name = "Season") +
    # scale_x_discrete(labels = c("Spring", "Summer", "Fall")) +
    theme_few()+
@@ -501,7 +516,7 @@ ggsave("../figures/rawNT.png", rawhypoNT, width = 3.5, height = 3)
 ```
 Get mean pairwise difference:
 ```{r}
-mean_pair_NT <- merge_temps %>% 
+mean_pair_NT <- paired_temps %>% 
   pivot_wider(id_cols = bird, names_from = c(season, type), values_from = mu)
 
 #spring
@@ -515,7 +530,7 @@ t.test(mean_pair_NT$fall_hypo, mean_pair_NT$fall_real, paired = T)
 ```
 
 ```{r}
-ggsave("../figures/muNT.png", meanhypoNT, width = 3.5, height = 3)
+ggsave("../figures/hyp_summer/muNT.png", meanhypoNT, width = 3.5, height = 3)
 ```
 
 ## Counterfactual NDVI
@@ -524,6 +539,8 @@ ggsave("../figures/muNT.png", meanhypoNT, width = 3.5, height = 3)
 ndvi_hypo_df$season <- fct_relevel(ndvi_hypo_df$season, 
                                    c("spring", "summer", "fall", "winter"))
 merge_ndvi$season <- fct_relevel(merge_ndvi$season, 
+                                 c("spring", "summer", "fall", "winter"))
+paired_ndvi$season <- fct_relevel(paired_ndvi$season, 
                                  c("spring", "summer", "fall", "winter"))
 ```
 
@@ -536,7 +553,7 @@ Make a plot of raw temps with raw hypo temps.
               shape = 17) +
    geom_point(data = ndvi_hypo_df[ndvi_hypo_df$season != "winter",],
               aes(x = doy, y = ndvi, color = season)) +
-   scale_color_brewer(palette = "Set1") +
+   scale_color_manual(values = pal) +
    ylab("NDVI") +
    xlab("Day of Year") +
    theme_few() +
@@ -545,7 +562,7 @@ Make a plot of raw temps with raw hypo temps.
    theme(legend.position = "none"))
 ```
 ```{r}
-ggsave("../figures/rawNDVI.png", rawhypoNDVI, width = 3.5, height = 3)
+ggsave("../figures/hyp_summer/rawNDVI.png", rawhypoNDVI, width = 3.5, height = 3)
 ```
 
 
@@ -556,25 +573,25 @@ names(season.names) <- c("spring", "summer", "fall")
 (meanhypoNDVI <- ggplot() +
     
     #real points and error bars
-    geom_errorbar(data = merge_ndvi[merge_ndvi$type == "real",],
+    geom_errorbar(data = paired_ndvi[paired_ndvi$type == "real",],
                   aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, group = bird), 
                   width = .3, size = 1, color = "black", alpha = 0.4,
                   position=position_dodge(width=0.9)) +
-    geom_point(data = merge_ndvi[merge_ndvi$type == "real",],
+    geom_point(data = paired_ndvi[paired_ndvi$type == "real",],
                aes(x = season, y = mu, group = bird),
                shape = 17, size = 1.5, color = "black", alpha = 0.4,
                position=position_dodge(width=0.9)) +
     
     #simulated points and bars
-    geom_errorbar(data = merge_ndvi[merge_ndvi$type == "hypo",],
+    geom_errorbar(data = paired_ndvi[paired_ndvi$type == "hypo",],
                   aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, 
                       color = season, group = bird),
                   width = .3, size = 1, position=position_dodge(width=0.9)) +
-    geom_point(data = merge_ndvi[merge_ndvi$type == "hypo",],
+    geom_point(data = paired_ndvi[paired_ndvi$type == "hypo",],
                aes(x = season, y = mu, color = season, group = bird),
                size = 1.5, position=position_dodge(width=0.9)) +
     
-    scale_color_brewer(palette = "Set1", 
+    scale_color_manual(values = pal, 
                        name = "Season") +
     # scale_x_discrete(labels = c("Spring", "Summer", "Fall")) +
     theme_few()+
@@ -588,12 +605,12 @@ names(season.names) <- c("spring", "summer", "fall")
     facet_grid(cols = vars(season), scales = "free"))
 ```
 ```{r}
-ggsave("../figures/muNDVI.png", meanhypoNDVI, width = 3.5, height = 3)
+ggsave("../figures/hyp_summer/muNDVI.png", meanhypoNDVI, width = 3.5, height = 3)
 ```
 
 Get mean pairwise difference:
 ```{r}
-mean_pair_ndvi <- merge_ndvi %>% 
+mean_pair_ndvi <- paired_ndvi %>% 
   pivot_wider(id_cols = bird, names_from = c(season, type), values_from = mu)
 
 #spring
@@ -615,7 +632,7 @@ hypSummLeg <- ggplot(merge_temps) +
                                      alpha = type, shape = type)) +
   geom_point(data = merge_temps_wint, aes(x = season, color = season, y = mu,
                                           alpha = type, shape = type)) + 
-  scale_color_brewer(palette = "Set1", 
+  scale_color_manual(values = pal, 
                      labels = c("Spring", "Summer", "Fall", "Winter"),
                      name = "Season") +
   scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
@@ -632,15 +649,21 @@ legend <- g_legend(hypSummLeg)
 grid.arrange(legend)
 ```
 ```{r}
-ggsave("../figures/legend.png", legend, width = 7, height = 0.5)
+ggsave("../figures/hyp_summer/legend.png", legend, width = 7, height = 0.5)
 ```
+
 #Counterfactual Winter
+```{r}
+pal2 <- c("#4daf4a", "#984ea3", "#377eb8")
+```
 
 ## Counterfactual NT
 ```{r}
 hypo_temp_wint_df$season <- fct_relevel(hypo_temp_wint_df$season, 
                                         c("spring", "summer", "fall", "winter"))
 merge_temps_wint$season <- fct_relevel(merge_temps_wint$season, 
+                                       c("spring", "summer", "fall", "winter"))
+paired_temps_wint$season <- fct_relevel(paired_temps_wint$season, 
                                        c("spring", "summer", "fall", "winter"))
 ```
 
@@ -652,7 +675,7 @@ Make a plot of raw temps with raw hypo temps.
               shape = 17) +
    geom_point(data = hypo_temp_wint_df[hypo_temp_wint_df$season != "summer",],
               aes(x = doy, y = temp, color = season)) +
-   scale_color_manual(values = c("#E41A1C", "#4DAF4A", "#984EA3"))+
+   scale_color_manual(values = pal2)+
    ylab(expression(paste("NT (",degree, "C)"))) +
    xlab("Day of Year") +
    theme_few() +
@@ -661,32 +684,32 @@ Make a plot of raw temps with raw hypo temps.
 ```
 
 ```{r}
-ggsave("../figures/Hypo_Wint/rawNT.png", rawhypoNTwint, width = 3.5, height = 3)
+ggsave("../figures/hyp_winter/rawNT.png", rawhypoNTwint, width = 3.5, height = 3)
 ```
 
 ```{r}
 (meanhypoNTwint <- ggplot() +
    
    #real points and error bars
-   geom_errorbar(data = merge_temps_wint[merge_temps_wint$type == "real",],
+   geom_errorbar(data = paired_temps_wint[paired_temps_wint$type == "real",],
                  aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, group = bird), 
                  width = .5, size = .5, color = "grey44",
                  position=position_dodge(width=0.9)) +
-   geom_point(data = merge_temps_wint[merge_temps_wint$type == "real",],
+   geom_point(data = paired_temps_wint[paired_temps_wint$type == "real",],
               aes(x = season, y = mu, group = bird),
               shape = 17, size = 1.5, color = "grey44",
               position=position_dodge(width=0.9)) +
    
    #simulated points and bars
-   geom_errorbar(data = merge_temps_wint[merge_temps_wint$type == "hypo",],
+   geom_errorbar(data = paired_temps_wint[paired_temps_wint$type == "hypo",],
                  aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, 
                      color = season, group = bird),
                  width = .5, size = .5, position=position_dodge(width=0.9)) +
-   geom_point(data = merge_temps_wint[merge_temps_wint$type == "hypo",],
+   geom_point(data = paired_temps_wint[paired_temps_wint$type == "hypo",],
               aes(x = season, y = mu, color = season, group = bird),
               size = 1.5, position=position_dodge(width=0.9)) +
    
-   scale_color_manual(values = c("#E41A1C", "#4DAF4A", "#984EA3"))+
+   scale_color_manual(values = pal2)+
    #scale_x_discrete(labels = c("Spring", "Summer", "Fall")) +
    # scale_alpha_manual(values = c(1, 0.3), 
    #                    labels = c("Simulated", "Experienced"),
@@ -705,50 +728,23 @@ ggsave("../figures/Hypo_Wint/rawNT.png", rawhypoNTwint, width = 3.5, height = 3)
    facet_grid(cols = vars(season), scales = "free"))
 ```
 ```{r}
-ggsave("../figures/Hypo_Wint/meanNT.png", meanhypoNTwint, width = 3.5, height = 3)
+ggsave("../figures/hyp_winter/meanNT.png", meanhypoNTwint, width = 3.5, height = 3)
 ```
-Extract legend.
 
+Get mean pairwise difference:
 ```{r}
-hypNTlegwint <- ggplot(merge_temps_wint) +
-  geom_point(data = merge_temps_wint,
-             aes(x = season, color = season, y = mu, 
-                 shape = type, alpha = type)) +
-  geom_errorbar(
-    aes(x = season, color = season, ymax = mu.CI.h, ymin = mu.CI.l,
-        alpha = type),
-    width = .3) +
-  scale_color_brewer(palette = "Set1", 
-                     name = "Season") +
-  scale_x_discrete(labels = c("Winter", "Spring", "Fall")) +
-  scale_alpha_manual(values = c(1, 0.3), 
-                     labels = c("Simulated", "Experienced"),
-                     name = "Data Type") +
-  scale_shape_discrete(labels = c("Simulated", "Experienced"),
-                       name = "Data Type") +
-  theme_few()
+mean_pair_nt_wint <- paired_temps_wint %>% 
+  pivot_wider(id_cols = bird, names_from = c(season, type), values_from = mu)
 
+#spring
+t.test(mean_pair_nt_wint$spring_hypo, mean_pair_nt_wint$spring_real, paired = T)
 
-legend <- g_legend(hypNTlegwint)
-grid.arrange(legend)
+#winter
+t.test(mean_pair_nt_wint$winter_hypo, mean_pair_nt_wint$winter_real, paired = T)
+
+#fall
+t.test(mean_pair_nt_wint$fall_hypo, mean_pair_nt_wint$fall_real, paired = T)
 ```
-
-### Arrange into single
-```{r fig.height=10, fig.width=7}
-gl5 <- list(rawhypoNTwint, meanhypoNTwint, legend)
-
-(hypontwintfig <- arrangeGrob(
-  grobs = gl5,
-  heights = unit(c(3, 5), c("in", "in")),
-  #  widths = c(2, 1, 1),
-  layout_matrix = rbind(c(1, 3),
-                        c(2, 2))
-))
-
-ggsave("hypo_nt_wint_fig.pdf", hypontwintfig)
-ggsave("hypo_nt_wint_fig.png", hypontwintfig)
-```
-
 
 ## Counterfactual NDVI
 ```{r}
@@ -762,7 +758,7 @@ Make a plot of raw temps with raw hypo temps.
 ```{r}
 (rawhypoNDVIwint <- ggplot() +
    geom_point(data = ndvi_df, 
-              aes(x = doy, y = temp), color = "lightgray", alpha = .7, 
+              aes(x = doy, y = ndvi), color = "lightgray", alpha = .7, 
               shape = 17) +
    geom_point(data = ndvi_hypo_wint_df[ndvi_hypo_wint_df$season != "summer",],
               aes(x = doy, y = temp, color = season)) +
@@ -775,7 +771,7 @@ Make a plot of raw temps with raw hypo temps.
 ```
 
 ```{r}
-ggsave("../figures/Hypo_Wint/rawNNDVI.png", rawhypoNDVIwint, width = 3.5, height = 3)
+ggsave("../figures/hyp_winter/rawNNDVI.png", rawhypoNDVIwint, width = 3.5, height = 3)
 ```
 
 ```{r}
@@ -811,46 +807,35 @@ ggsave("../figures/Hypo_Wint/rawNNDVI.png", rawhypoNDVIwint, width = 3.5, height
    facet_grid(cols = vars(season), scales = "free"))
 ```
 ```{r}
-ggsave("../figures/Hypo_Wint/meanNDVI.png", meanhypoNDVIwint, width = 3.5, height = 3)
+ggsave("../figures/hyp_winter/meanNDVI.png", meanhypoNDVIwint, width = 3.5, height = 3)
 ```
-Extract legend.
 
-```{r}
-hypNDVIlegwint <- ggplot(merge_ndvi_wint) +
-  geom_point(aes(x = season, color = season, y = mu, 
-                 shape = type, alpha = type)) +
-  geom_errorbar(aes(x = season, color = season, ymax = mu.CI.h, ymin = mu.CI.l,
-                    alpha = type),
-                width = .3) +
-  scale_color_brewer(palette = "Set1", 
+
+## Common legend
+Extract common legend.
+
+```{r fig.width=7, fig.height = 0.5}
+hypWintLeg <- ggplot(merge_temps) +
+  # geom_point(data = merge_temps, aes(x = season, color = season, y = mu,
+  #                                    alpha = type, shape = type)) +
+  geom_point(data = merge_temps_wint, aes(x = season, color = season, y = mu,
+                                          alpha = type, shape = type)) + 
+  scale_color_manual(values = pal2, 
+                     labels = c("Spring", "Fall", "Winter"),
                      name = "Season") +
-  scale_x_discrete(labels =  c("Winter", "Spring", "Fall")) +
+  scale_x_discrete(labels = c("Spring", "Fall", "Winter")) +
   scale_alpha_manual(values = c(1, 0.3), 
                      labels = c("Simulated", "Experienced"),
                      name = "Data Type") +
   scale_shape_discrete(labels = c("Simulated", "Experienced"),
                        name = "Data Type") +
-  theme_few()
+  theme_few() +
+  theme(legend.box = "horizontal", legend.position = "bottom")
 
 
-legend <- g_legend(hypNDVIlegwint)
+legend <- g_legend(hypWintLeg)
 grid.arrange(legend)
-```
-
-### Arrange into single
-```{r fig.height=10, fig.width=7}
-gl6 <- list(rawhypoNDVIwint, meanhypoNDVIwint, legend)
-
-(hypondviwintfig <- arrangeGrob(
-  grobs = gl6,
-  heights = unit(c(3, 5), c("in", "in")),
-  #  widths = c(2, 1, 1),
-  layout_matrix = rbind(c(1, 3),
-                        c(2, 2))
-))
-
-ggsave("hypo_ndvi_wint_fig.pdf", hypondviwintfig)
-ggsave("hypo_ndvi_wint_fig.png", hypondviwintfig)
+ggsave("../figures/hyp_winter/legend.png", hypWintLeg, width = 7, height = 0.5)
 ```
 
 # Breeding Season Transitions

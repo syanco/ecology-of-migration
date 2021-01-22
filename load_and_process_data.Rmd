@@ -1019,6 +1019,17 @@ merge_temps <- merge_temps %>%
 # & bird != "A43_2016" & bird != "CNG1_2018")
 ```
 
+Remove "unpaired" birds (no sim matching real in a season)
+
+```{r}
+paired <- merge_temps %>% 
+  group_by(bird, season) %>% 
+  summarise(count = n()) %>% 
+  filter(count == 2)
+
+paired_temps <- merge_temps %>% 
+  inner_join(paired, by = c("bird", "season"))
+```
 
 ### Counterfactual NDVI
 
@@ -1108,7 +1119,17 @@ merge_ndvi <- merge_ndvi %>%
   filter(!is.na(sd))
          # & bird != "A43_2016" & bird != "CNG1_2018")
 ```
+Remove "unpaired" birds (no sim matching real in a season)
 
+```{r}
+paired_2 <- merge_ndvi %>% 
+  group_by(bird, season) %>% 
+  summarise(count = n()) %>% 
+  filter(count == 2)
+
+paired_ndvi <- merge_ndvi %>% 
+  inner_join(paired_2, by = c("bird", "season"))
+```
 
 ## Simulated Winter
 
@@ -1202,10 +1223,21 @@ merge_temps_wint$type <- c(rep("hypo", nrow(hypotempwintsummary)),
 
 #filter out winter positions and birds with no hypo points
 merge_temps_wint <- merge_temps_wint %>%
-  filter(season != "summer")
+  filter(season != "summer") %>% 
+  filter(!is.na(sd))
 # & bird != "A43_2016" & bird != "CNG1_2018")
 ```
+Remove "unpaired" birds (no sim matching real in a season)
 
+```{r}
+paired_3 <- merge_temps_wint %>% 
+  group_by(bird, season) %>% 
+  summarise(count = n()) %>% 
+  filter(count == 2)
+
+paired_temps_wint <- merge_temps_wint %>% 
+  inner_join(paired_3, by = c("bird", "season"))
+```
 
 ### Counterfactual NDVI
 
@@ -1294,7 +1326,8 @@ merge_ndvi_wint$type <- c(rep("hypo", nrow(hypondviwintsummary)),
                           rep("real", nrow(ndvisummary)))
 #filter out winter positions and birds with no hypo points
 merge_ndvi_wint <- merge_ndvi_wint %>% 
-  filter(season != "summer")
+  filter(season != "summer") %>% 
+  filter(!is.na(sd))
 # & bird != "A43_2016" & bird != "CNG1_2018")
 ```
 
