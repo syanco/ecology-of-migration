@@ -70,14 +70,7 @@ Calculate the duration of spring and fall migration and spit out some summary st
 ```{r}
 (timing$spdur <- timing$first_on_terr_doy - timing$wint_dep_doy)
 (timing$fadur <- timing$wint_arr_doy - timing$last_on_terr_doy)
-# 
-# #migration duration - using this study only
-# median(na.omit(timing$spdur[1:8]))
-# median(na.omit(timing$fadur[1:8]))
-# min(na.omit(timing$spdur[1:8]))
-# max(na.omit(timing$spdur[1:8]))
-# min(na.omit(timing$fadur[1:8]))
-# max(na.omit(timing$fadur[1:8]))
+
 ```
 
 Create separate timing objects for each study site (used for breeding season phenology)
@@ -89,7 +82,6 @@ id_time <- timing[timing$study_area == "ID",]
 ut_time <- timing[timing$study_area == "UT",]
 ```
 
-#SY - VERIFY THIS IS STILL NEEDED ####
 Define some "conservative" boundaries for population-level wintering and breeding so minimize the chance of any observations during this period being of en route migrants (e.g. start of winter = the last observed fall>winter transition and end of winter is earliest observed winter>spring transition):
 ```{r}
 start_breed <- max(na.omit(timing$arrival))
@@ -731,7 +723,6 @@ rm(raster_ts)
 ```
 
 Load in HC and MEF long-term NDVI for time-series.
-# SY - NEED TO DOWNLOAD AND ADD ID AND UT TIME SERIES HERE ####
 ```{r}
 load("../data/HC_ndvi/VI_16Days_500m_v6/Time_Series/RData/Terra/NDVI/MOD13A1_NDVI_49_2000_1_2020_RData.RData")
 HC_ndvi <- raster_ts
@@ -1337,7 +1328,15 @@ merge_ndvi_wint <- merge_ndvi_wint %>%
   filter(!is.na(sd))
 # & bird != "A43_2016" & bird != "CNG1_2018")
 ```
+```{r}
+paired_4 <- merge_ndvi_wint %>% 
+  group_by(bird, season) %>% 
+  summarise(count = n()) %>% 
+  filter(count == 2)
 
+paired_ndvi_wint <- merge_ndvi_wint %>% 
+  inner_join(paired_4, by = c("bird", "season"))
+```
 # Breeding season conditions at transitions
 
 ## Min Temp
@@ -1469,8 +1468,16 @@ save(ndvi_df, temp_df,
      tempsummary, ndvisummary,
      hypotempsummary, hypondvisummary,
      # hc_time, mef_time,
-     # timing,
-     # MEF_ndvi, MEF_ndvi_ts,
-     # HC_ndvi, HC_ndvi_ts,
+     timing,
+     MEF_ndvi, 
+     # MEF_ndvi_ts,
+     HC_ndvi, 
+     # HC_ndvi_ts,
+     paired_ndvi,
+     paired_temps,
+     paired_temps_wint,
+     paired_ndvi_wint,
+     merge_temps_wint,
+     merge_temps,
      file = paste0("../out/extract_", Sys.Date(), ".Rdata"))
 ```

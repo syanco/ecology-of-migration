@@ -92,14 +92,14 @@ getNDVI <- function(x, move_data, ndvi_brick, doy_index, QA_brick){
   
   if(is.na(qa) == T) {
     return(NA)
+  } else {
+    if(qa <= 1) {
+      cell <- raster::extract(r, p)
+      return(cell)
     } else {
-      if(qa <= 1) {
-        cell <- raster::extract(r, p)
-        return(cell)
-        } else {
-          return(NA)
-        }
+      return(NA)
     }
+  }
 }
 
 
@@ -392,4 +392,79 @@ g_legend<-function(a.gplot){
   leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
   legend <- tmp$grobs[[leg]]
   legend
+}
+
+#convenience function to check ci overlap
+CI_overlap <- function(ci_l, ci_h, data = NULL, df = F) {
+  if(typeof(ci_l) == "character" &
+     typeof(ci_h) == "character") {
+    if(is.null(data)) {
+      stop("Data frame must be supplied for data since estimates are strings")
+    } else {
+      checksum <- sum(data[ci_h] > data[ci_l])
+      if(checksum != nrow(data)) {
+        stop("Invalid CIs supplied - at least one ci_h < ci_l")
+      }
+      mat <- matrix(NA, nrow = nrow(data), ncol = nrow(data))
+      mat_bool <- matrix(NA, nrow = nrow(data), ncol = nrow(data))
+      for(i in 1:nrow(data)){
+        for(j in 1:(nrow(data))){
+          mat[i,j] <- data[[ci_l]][i] - data[[ci_h]][j]
+          mat_bool[i,j] <- ifelse(mat[i,j] > 0, T, ifelse(mat[i,j] < 0, F, NA))
+          if(j == i){
+            mat_bool[i,j] <- NA
+          }
+        }
+      }
+      mat_sum <- mat_bool+t(mat_bool)
+      mat_sum[upper.tri(mat_sum)] <- NA
+      rs <-row(mat_sum)[which(mat_sum == 2)]
+      cs <-col(mat_bool)[which(mat_sum == 2)]
+      dat <- cbind(rs, cs)
+    }
+  } else {
+    if(typeof(ci_l) == typeof(ci_h)) {
+      mat <- matrix(NA, nrow = length(ci_h), ncol = length(ci_l))
+      if(nrow(mat) != ncol(mat)) {
+        stop("ci_l and ci_h must have same length")
+      }
+      checksum <- sum(ci_h > ci_l)
+      if(checksum != length(ci_l)) {
+        stop("Invalid CIs supplied - at least one ci_h < ci_l")
+      }
+      mat_bool <- matrix(NA, nrow = length(ci_h), ncol = length(ci_l))
+      for(i in 1:length(ci_l)){
+        for(j in 1:(length(ci_h))){
+          mat[i,j] <- ci_l[i] - ci_h[j]
+          mat_bool[i,j] <- ifelse(mat[i,j] > 0, T, ifelse(mat[i,j] < 0, F, NA))
+          if(j == i){
+            mat_bool[i,j] <- NA
+          }
+        }
+      }
+      mat_sum <- mat_bool+t(mat_bool)
+      mat_sum[upper.tri(mat_sum)] <- NA
+      rs <-row(mat_sum)[which(mat_sum == 2)]
+      cs <-col(mat_bool)[which(mat_sum == 2)]
+      dat <- cbind(rs, cs)
+    } else {
+      stop("ci_l and ci_h types must match")
+    }
+  }
+  if(length(rs) == 0 ) {
+    print("All CIs overlap")
+  } else {
+    print("Non-overlapping CIs:")
+    for(i in 1:length(rs)){
+      cat(paste0("\t", "Estimate ", rs[i], " and ", cs[i], "\n"))  
+    }
+  }
+  if(df == T){
+    return(dat) 
+  }
+}
+
+varBeta <- function(mu, phi) {
+  var <- (mu*(1-mu))/(1-phi)
+  return(var)
 }

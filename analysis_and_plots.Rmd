@@ -36,6 +36,7 @@ library(glmmTMB)
 library(ggeffects)
 library(lattice)
 library(tidymv)
+library(tidybayes)
 library(mgcv)
 library(brms)
 library(fpp2)
@@ -44,7 +45,7 @@ library(fpp2)
 Load data from previous script (rather than source data load and processing script which is very time consuming).
 
 ```{r}
-load("../out/extract_2021-01-20.Rdata")
+load("../out/extract_2021-01-21.Rdata")
 source("./functions.R")
 ```
 
@@ -134,16 +135,52 @@ ggsave("../figures/trackmap.png", trackmap)
 ## Models
 
 ```{r}
-get_prior(bf(temp ~ 0 + season + (1|bird) + ar(time = date,gr = bird, cov = T), 
+temp_df$date2 <- as.numeric(temp_df$date)
+temp_df$season <- fct_relevel(temp_df$season, 
+                              c("spring", "summer", "fall", "winter"))
+
+get_prior(bf(temp ~ 0 + season + (1|bird) + ar(time = date2, p = 2, gr = bird, cov = F), 
              sigma ~ 0 +season, family = gaussian()), data = temp_df)
 
-fit_temp <- brm(bf(temp ~ 0 + season + (1|bird) + ar(time = date,gr = bird, cov = T), 
+fit_temp <- brm(bf(temp ~ 0 + season + (1|bird) + ar(time = date2, p = 2, gr = bird, cov = F), 
              sigma ~ 0 + season, family = gaussian()), data = temp_df, 
-             chains = 4, iter = 10000, getOption("mc.cores", 3))
+             chains = 3, iter = 1000, cores = getOption("mc.cores", 3))
 fit_temp
 ```
 
 ### Model performance checks:
+
+```{r}
+#quantile residuals
+temp_df %>%
+  mutate(date = as.numeric(date)) %>% 
+  add_predicted_draws(fit_temp, n=1000) %>%
+  summarise(
+    p_residual = mean(.prediction < temp),
+    z_residual = qnorm(p_residual)
+  ) %>%
+  ggplot(aes(sample = z_residual)) +
+  geom_qq() +
+  geom_abline()
+
+# macf(residuals(fit_temp, summary = FALSE), lag.max = 10)
+```
+
+```{r}
+mcmc_plot(fit_temp, type = "acf_bar")
+```
+
+Prior predictive check
+```{r}
+pp_check(fit_temp, nsamples = 100)
+```
+
+Margianls
+```{r}
+mmp_brm(fit_temp, x = "season", prob = .95)
+```
+
+
 
 Look at residuals and autocorrelation
 ```{r}
@@ -161,17 +198,34 @@ plot(acf(resid, lag = 40))
 ### Summarize
 
 ```{r}
-sum_temp <- summary(fit_temp)
+temp_fixed <- fixef(fit_temp)
 
-sum_temp$fixed
+(temp_mod_mu_df <- data.frame(param = rep("mu", 4),
+                          est = temp_fixed[1:4,1],
+                          CI_l = temp_fixed[1:4,3],
+                          CI_h = temp_fixed[1:4,4],
+                          season = c("spring", "summer", "fall", "winter"),
+                          row_names = rownames(temp_fixed)[1:4]))
 
-(temp_mod_df <- data.frame(param = c(rep("mu", 4), rep("sigma", 4)),
-                          est = sum_temp$fixed[,1],
-                          CI_l = sum_temp$fixed[,3],
-                          CI_h = sum_temp$fixed[,4],
-                          season = rep(c("summer", "fall", "winter", "spring"),
-                                       2)))
+(temp_mod_var_df <- data.frame(param = rep("var", 4),
+                          est = temp_fixed[5:8,1]^2,
+                          CI_l = temp_fixed[5:8,3]^2,
+                          CI_h = temp_fixed[5:8,4]^2,
+                          season = c("spring", "summer", "fall", "winter"),
+                          row_names = rownames(temp_fixed)[5:8]))
+
+
 ```
+Check CI overlap:
+```{r}
+print("Mu")
+CI_overlap(ci_l = "CI_l", ci_h = "CI_h", data = temp_mod_mu_df)
+
+print("Var")
+CI_overlap(ci_l = "CI_l", ci_h = "CI_h", data = temp_mod_var_df)
+```
+
+
 
 ## Plots
 Create 4-color palette: 
@@ -184,12 +238,14 @@ Reorder some factors for plotting
 ```{r}
 temp_df$season <- fct_relevel(temp_df$season, 
                               c("spring", "summer", "fall", "winter"))
-tempsummary$season <- fct_relevel(tempsummary$season, 
+# tempsummary$season <- fct_relevel(tempsummary$season, 
+                                  # c("spring", "summer", "fall", "winter"))
+temp_mod_mu_df$season <- fct_relevel(temp_mod_mu_df$season, 
                                   c("spring", "summer", "fall", "winter"))
-# tempmod$season <- fct_relevel(tempmod$season, 
-#                               c("spring", "breeding", "fall", "winter"))
-# tempvar$season <- fct_relevel(tempvar$season,
-#                               c("spring", "summer", "fall", "winter"))
+
+temp_mod_var_df$season <- fct_relevel(temp_mod_var_df$season, 
+                                  c("spring", "summer", "fall", "winter"))
+
 ```
 
 Make a common legend:
@@ -224,16 +280,14 @@ Now plot panel A - raw temps.
 
 Plot panel B - estimated means from the model
 ```{r fig.width=3.5, fig.height=3}
-temp_mod_df[temp_mod_df$param == "mu",]
-
-(meantemps <- ggplot(temp_mod_df[temp_mod_df$param == "mu",]) +
+(meantemps <- ggplot(temp_mod_mu_df) +
   geom_point(aes(x = season, y = est, colour = season), size = 1.5) +
   geom_errorbar(aes(x = season, ymax = CI_h, ymin = CI_l, colour = season),
   width =.5, size = .5) +
-  annotate(geom="text", x=4.2, y=14.7, label="B", size = 7) +
-  # scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
+  annotate(geom="text", x=4.3, y=14.9, label="B", size = 7) +
+  scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
   scale_colour_manual(values = pal) +
-  ylim(0, 15) +
+  ylim(0, 16) +
   ylab(expression(paste("Mean NT (",degree, "C)"))) +
   xlab("Season") + 
   theme_few() +
@@ -241,16 +295,14 @@ temp_mod_df[temp_mod_df$param == "mu",]
 ```
 
 ```{r fig.width=3.5, fig.height=3}
-temp_mod_df[temp_mod_df$param == "sigma",]
-(SDtemps <- ggplot(temp_mod_df[temp_mod_df$param == "sigma",]
-) +
+(SDtemps <- ggplot(temp_mod_var_df) +
   geom_point(aes(x = season, y = est, color = season), size = 1.5) +
   geom_errorbar(aes(x = season, ymin = CI_l, ymax = CI_h, color = season),
                 width = .5, size = .5) +
   scale_colour_manual(values = pal) +
   scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
-  annotate(geom="text", x=4.2, y=1.8, label="C", size = 7) +
-  ylab(expression(paste("Std. Dev. NT (",degree, "C)"))) +
+  annotate(geom="text", x=4.3, y=3.2, label="C", size = 7) +
+  ylab(expression(paste("Variance NT (",degree, "C)"))) +
   xlab("Season") + 
   theme_few() +
   theme(legend.position = "none"))
@@ -289,22 +341,98 @@ Build the linear model that includes:
 
 Need to make a factior date for this AR1
 ```{r}
-ndvi_df$date_factor <- factor(ndvi_df$date)
+ndvi_df$date2 <- as.numeric(temp_df$date)
 ndvi_df$bird <- factor(ndvi_df$bird)
 ```
 
 
 First fit the models.
 ```{r}
-get_prior(bf(ndvi ~ season + (1|bird) + ar(time = date,gr = bird, cov = T), 
-             phi ~ season, family = Beta()), data = ndvi_df)
+get_prior(bf(ndvi ~ 0 + season + (1|bird) + ar(time = date2, gr = bird, cov = T), 
+             phi ~ 0 + season, family = Beta()), data = ndvi_df)
 
-fit_ndvi <- brm(bf(ndvi ~ season + (1|bird) + ar(time = date, gr = bird, cov = T), 
-             phi ~ season, family = Beta()), data = ndvi_df, 
-             chains = 4, iter = 1000, cores = getOption("mc.cores", 3),
-             control = list(adapt_delta = 0.95))
+fit_ndvi <- brm(bf(ndvi ~ 0 + season + (1|bird) + ar(time = date2, gr = bird, cov = T), 
+             phi ~ 0 + season, family = Beta()), data = ndvi_df, 
+             chains = 2, iter = 1000, cores = getOption("mc.cores", 3),
+             control = list(adapt_delta = 0.99))
 fit_ndvi
+
+inv_logit_scaled(fixef(fit_ndvi))
+
 ```
+
+
+```{r}
+resid <- resid(fit_ndvi, type = "pearson")[, "Estimate"]
+n <- length(resid)
+resid[-1] <- resid[-1] - (resid[-n] * mean(as.matrix(fit_ndvi)[,
+    "ar[1]"]))
+fit <- fitted(fit_ndvi)[, "Estimate"]
+
+ggplot() + geom_point(data = NULL, aes(y = resid, x = fit))
+plot(acf(resid, lag = 40))
+```
+```{r}
+#quantile residuals
+ndvi_df %>%
+  mutate(date = as.numeric(date)) %>% 
+  add_predicted_draws(fit_ndvi, n=1000) %>%
+  summarise(
+    p_residual = mean(.prediction < ndvi),
+    z_residual = qnorm(p_residual)
+  ) %>%
+  ggplot(aes(sample = z_residual)) +
+  geom_qq() +
+  geom_abline()
+
+# macf(residuals(fit_temp, summary = FALSE), lag.max = 10)
+```
+
+Prior predictive check
+```{r}
+pp_check(fit_ndvi, nsamples = 100)
+```
+
+Modeled as normal.. 
+```{r}
+
+fit_ndvi_2 <- brm(bf(ndvi ~ 0 + season + (1|bird) + ar(time = date2, gr = bird, cov = F), 
+             sigma ~ 0 + season, family = gaussian()), data = ndvi_df, 
+             chains = 4, iter = 1000, cores = getOption("mc.cores", 3)) 
+
+fit_ndvi_2
+```
+```{r}
+resid <- resid(fit_ndvi_2, type = "pearson")[, "Estimate"]
+n <- length(resid)
+resid[-1] <- resid[-1] - (resid[-n] * mean(as.matrix(fit_ndvi_2)[,
+    "ar[1]"]))
+fit <- fitted(fit_ndvi_2)[, "Estimate"]
+
+ggplot() + geom_point(data = NULL, aes(y = resid, x = fit))
+plot(acf(resid, lag = 40))
+```
+```{r}
+#quantile residuals
+ndvi_df %>%
+  mutate(date = as.numeric(date)) %>% 
+  add_predicted_draws(fit_ndvi_2, n=1000) %>%
+  summarise(
+    p_residual = mean(.prediction < ndvi),
+    z_residual = qnorm(p_residual)
+  ) %>%
+  ggplot(aes(sample = z_residual)) +
+  geom_qq() +
+  geom_abline()
+
+# macf(residuals(fit_temp, summary = FALSE), lag.max = 10)
+```
+
+Prior predictive check
+```{r}
+pp_check(fit_ndvi_2, nsamples = 100)
+```
+
 ### Model performance checks
 
 ```{r}
@@ -322,43 +450,70 @@ plot(acf(resid, lag = 40))
 ### Summarize
 
 ```{r}
-sum_ndvi <- summary(fit_ndvi)
+ndvi_fixed <- fixef(fit_ndvi)
 
-sum_ndvi$fixed
+(ndvi_mod_mu_df <- data.frame(param = rep("mu", 4),
+                          est = inv_logit_scaled(ndvi_fixed[1:4,1]),
+                          CI_l = inv_logit_scaled(ndvi_fixed[1:4,3]),
+                          CI_h = inv_logit_scaled(ndvi_fixed[1:4,4]),
+                          season = c("spring", "summer", "fall", "winter"),
+                          row_names = rownames(ndvi_fixed)[1:4]))
 
-(ndvi_mod_df <- data.frame(param = c("mu", "phi", "mu", "mu", "mu", 
-                                     "phi", "phi", "phi"),
-                          est = sum_ndvi$fixed[,1],
-                          CI_l = sum_ndvi$fixed[,3],
-                          CI_h = sum_ndvi$fixed[,4],
-                          season = c("summer", "summer", "fall", "winter", 
-                                         "spring","fall", "winter", "spring"),
-                          est_2 = NA,
-                          CI_l_2 = NA,
-                          CI_h_2 = NA))
+(ndvi_mod_var_df <- data.frame(param = rep("var", 4),
+                          est = 1/ndvi_fixed[5:8],
+                          CI_l = 1/ndvi_fixed[5:8,4],
+                          CI_h = 1/ndvi_fixed[5:8,3],
+                          season = c("spring", "summer", "fall", "winter"),
+                          row_names = rownames(ndvi_fixed)[5:8]))
 
-#hacky code to deal with offsets - remove once model refitted through intercept
-for (i in 3:nrow(ndvi_mod_df)) {
-  if(ndvi_mod_df$param[i] == "mu"){
-    ndvi_mod_df$est_2[i] <- ndvi_mod_df$est[i] + ndvi_mod_df$est[1]
-    ndvi_mod_df$CI_l_2[i] <- ndvi_mod_df$CI_l[i] + ndvi_mod_df$CI_l[1]
-    ndvi_mod_df$CI_h_2[i] <- ndvi_mod_df$CI_h[i] + ndvi_mod_df$CI_h[1]
 
-  }  else {
-    ndvi_mod_df$est_2[i] <- ndvi_mod_df$est[i] + ndvi_mod_df$est[2]
-    ndvi_mod_df$CI_l_2[i] <- ndvi_mod_df$CI_l[i] + ndvi_mod_df$CI_l[2]
-    ndvi_mod_df$CI_h_2[i] <- ndvi_mod_df$CI_h[i] + ndvi_mod_df$CI_h[2]
-  }
-}
+```
+Check CI overlap:
+```{r}
+print("Mu")
+CI_overlap(ci_l = "CI_l", ci_h = "CI_h", data = ndvi_mod_mu_df)
 
-ndvi_mod_df$est_2[1] <- ndvi_mod_df$est[1]
-ndvi_mod_df$est_2[2] <- ndvi_mod_df$est[2]
+print("Var")
+CI_overlap(ci_l = "CI_l", ci_h = "CI_h", data = ndvi_mod_var_df)
+```
 
-ndvi_mod_df$CI_l_2[1] <- ndvi_mod_df$CI_l[1]
-ndvi_mod_df$CI_l_2[2] <- ndvi_mod_df$CI_l[2]
+```{r}
+(fixed_ndvi <- inv_logit_scaled(fixef(fit_ndvi)))
 
-ndvi_mod_df$CI_h_2[1] <- ndvi_mod_df$CI_h[1]
-ndvi_mod_df$CI_h_2[2] <- ndvi_mod_df$CI_h[2]
+(ndvi_mod_df <- data.frame(param = c(rep("mu", 4), rep("phi", 4)),
+                          est = fixed_ndvi[,1],
+                          CI_l = fixed_ndvi[,3],
+                          CI_h = fixed_ndvi[,4],
+                          season = c("spring", "summer", "fall", "winter", 
+                                         "spring", "summer", "fall", "winter"),
+                          row_names = rownames(fixed_ndvi)
+                          # est_2 = NA,
+                          # CI_l_2 = NA,
+                          # CI_h_2 = NA
+                          ))
+
+# #hacky code to deal with offsets - remove once model refitted through intercept
+# for (i in 3:nrow(ndvi_mod_df)) {
+#   if(ndvi_mod_df$param[i] == "mu"){
+#     ndvi_mod_df$est_2[i] <- ndvi_mod_df$est[i] + ndvi_mod_df$est[1]
+#     ndvi_mod_df$CI_l_2[i] <- ndvi_mod_df$CI_l[i] + ndvi_mod_df$CI_l[1]
+#     ndvi_mod_df$CI_h_2[i] <- ndvi_mod_df$CI_h[i] + ndvi_mod_df$CI_h[1]
+# 
+#   }  else {
+#     ndvi_mod_df$est_2[i] <- ndvi_mod_df$est[i] + ndvi_mod_df$est[2]
+#     ndvi_mod_df$CI_l_2[i] <- ndvi_mod_df$CI_l[i] + ndvi_mod_df$CI_l[2]
+#     ndvi_mod_df$CI_h_2[i] <- ndvi_mod_df$CI_h[i] + ndvi_mod_df$CI_h[2]
+#   }
+# }
+# 
+# ndvi_mod_df$est_2[1] <- ndvi_mod_df$est[1]
+# ndvi_mod_df$est_2[2] <- ndvi_mod_df$est[2]
+# 
+# ndvi_mod_df$CI_l_2[1] <- ndvi_mod_df$CI_l[1]
+# ndvi_mod_df$CI_l_2[2] <- ndvi_mod_df$CI_l[2]
+# 
+# ndvi_mod_df$CI_h_2[1] <- ndvi_mod_df$CI_h[1]
+# ndvi_mod_df$CI_h_2[2] <- ndvi_mod_df$CI_h[2]
 
 ```
 
@@ -373,6 +528,11 @@ ndvi_df$season <- fct_relevel(ndvi_df$season,
 #                               c("spring", "breeding", "fall", "winter"))
 # ndvivar$season <- fct_relevel(ndvivar$season,
 #                               c("spring", "summer", "fall", "winter"))
+ndvi_mod_mu_df$season <- fct_relevel(ndvi_mod_mu_df$season, 
+                                  c("spring", "summer", "fall", "winter"))
+
+ndvi_mod_var_df$season <- fct_relevel(ndvi_mod_var_df$season, 
+                                  c("spring", "summer", "fall", "winter"))
 ```
 
 Now plot panel A - raw NDVI.
@@ -395,14 +555,14 @@ Now plot panel A - raw NDVI.
 Plot panel B - estimated means from the model
 # CHANGE EST_2 TO EST AFTER REFITTING MODEL THROUGH INTERECPT
 ```{r fig.width=3.5, fig.height=3}
-(meanndvi <- ggplot(ndvi_mod_df[ndvi_mod_df$param == "mu",]) +
-  geom_point(aes(x = season, y = est_2, colour = season), size = 1.5) +
-  geom_errorbar(aes(x = season, ymax = CI_h_2, ymin = CI_l_2, colour = season), 
+(meanndvi <- ggplot(ndvi_mod_mu_df) +
+  geom_point(aes(x = season, y = est, colour = season), size = 1.5) +
+  geom_errorbar(aes(x = season, ymax = CI_h, ymin = CI_l, colour = season), 
                 width =.5, size = .5) +
-  scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
+  # scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
   scale_colour_manual(values = pal) +
   annotate(geom="text", x=4.2, y=.95, label="B", size = 7) +
-  # ylim(0, 1) +
+  ylim(0, 1) +
   ylab("Mean NDVI") +
   xlab("Season") + 
   theme_few() +
@@ -411,14 +571,14 @@ Plot panel B - estimated means from the model
 
 Plot Panel C - strata-specific variances
 ```{r fig.width=3.5, fig.height=3}
-(SDndvi <- ggplot(ndvi_mod_df[ndvi_mod_df$param == "phi",]) +
-  geom_point(aes(x = season, y = est_2, color = season), size = 1.5) +
-  geom_errorbar(aes(x = season, ymin = CI_l_2, ymax = CI_h_2, color = season),
+(SDndvi <- ggplot(ndvi_mod_var_df) +
+  geom_point(aes(x = season, y = est, color = season), size = 1.5) +
+  geom_errorbar(aes(x = season, ymin = CI_l, ymax = CI_h, color = season),
                 width = .5, size = .5) +
   scale_colour_manual(values = pal) +
   scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
   annotate(geom="text", x=4.2, y=.5, label="C", size = 7) +
-  ylab("Std. Dev. NDVI") +
+  ylab("Variance NDVI") +
   xlab("Season") + 
   theme_few() +
   theme(legend.position = "none"))
@@ -444,7 +604,11 @@ ggsave("../figures/ndvi_fig.png", ntfig)
 
 ## Save Model Objects 
 ```{r}
-save(fit_ndvi, fit_temp, file = paste0("../out/model_fits_", Sys.Date(), ".Rdata"))
+save(
+  fit_ndvi, 
+  fit_temp,
+  # fit_ndvi_2, 
+  file = paste0("../out/model_fits_", Sys.Date(), ".Rdata"))
 ```
 
 
@@ -752,6 +916,8 @@ ndvi_hypo_wint_df$season <- fct_relevel(ndvi_hypo_wint_df$season,
                                         c("spring", "summer", "fall", "winter"))
 merge_ndvi_wint$season <- fct_relevel(merge_ndvi_wint$season, 
                                       c("spring", "summer", "fall", "winter"))
+paired_ndvi_wint$season <- fct_relevel(paired_ndvi_wint$season, 
+                                      c("spring", "summer", "fall", "winter"))
 ```
 
 Make a plot of raw temps with raw hypo temps.
@@ -762,7 +928,7 @@ Make a plot of raw temps with raw hypo temps.
               shape = 17) +
    geom_point(data = ndvi_hypo_wint_df[ndvi_hypo_wint_df$season != "summer",],
               aes(x = doy, y = temp, color = season)) +
-   scale_color_manual(values = c("#E41A1C", "#4DAF4A", "#984EA3"))+
+   scale_color_manual(values = pal2)+
    ylab("NDVI") +
    xlab("Day of Year") +
    theme_few() +
@@ -778,25 +944,25 @@ ggsave("../figures/hyp_winter/rawNNDVI.png", rawhypoNDVIwint, width = 3.5, heigh
 (meanhypoNDVIwint <- ggplot() +
    
    #real points and error bars
-   geom_errorbar(data = merge_ndvi_wint[merge_ndvi_wint$type == "real",],
+   geom_errorbar(data = paired_ndvi_wint[paired_ndvi_wint$type == "real",],
                  aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, group = bird), 
                  width = .5, size = .5, color = "grey44",
                  position=position_dodge(width=0.9)) +
-   geom_point(data = merge_ndvi_wint[merge_ndvi_wint$type == "real",],
+   geom_point(data = paired_ndvi_wint[paired_ndvi_wint$type == "real",],
               aes(x = season, y = mu, group = bird),
               shape = 17, size = 1.5, color = "grey44",
               position=position_dodge(width=0.9)) +
    
    #simulated points and bars
-   geom_errorbar(data = merge_ndvi_wint[merge_ndvi_wint$type == "hypo",],
+   geom_errorbar(data = paired_ndvi_wint[paired_ndvi_wint$type == "hypo",],
                  aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, 
                      color = season, group = bird),
                  width = .5, size = .5, position=position_dodge(width=0.9)) +
-   geom_point(data = merge_ndvi_wint[merge_ndvi_wint$type == "hypo",],
+   geom_point(data = paired_ndvi_wint[paired_ndvi_wint$type == "hypo",],
               aes(x = season, y = mu, color = season, group = bird),
               size = 1.5, position=position_dodge(width=0.9)) +
    
-   scale_color_manual(values = c("#E41A1C", "#4DAF4A", "#984EA3"))+
+   scale_color_manual(values = pal2)+
    theme_few()+
    theme(axis.ticks.x = element_blank(),
          legend.position = "none", strip.placement = "bottom", 
@@ -810,7 +976,20 @@ ggsave("../figures/hyp_winter/rawNNDVI.png", rawhypoNDVIwint, width = 3.5, heigh
 ggsave("../figures/hyp_winter/meanNDVI.png", meanhypoNDVIwint, width = 3.5, height = 3)
 ```
 
+Get mean pairwise difference:
+```{r}
+mean_pair_ndvi_wint <- paired_ndvi_wint %>% 
+  pivot_wider(id_cols = bird, names_from = c(season, type), values_from = mu)
 
+#spring
+t.test(mean_pair_ndvi_wint$spring_hypo, mean_pair_ndvi_wint$spring_real, paired = T)
+
+#winter
+t.test(mean_pair_ndvi_wint$winter_hypo, mean_pair_ndvi_wint$winter_real, paired = T)
+
+#fall
+t.test(mean_pair_ndvi_wint$fall_hypo, mean_pair_ndvi_wint$fall_real, paired = T)
+```
 ## Common legend
 Extract common legend.
 
@@ -818,7 +997,7 @@ Extract common legend.
 hypWintLeg <- ggplot(merge_temps) +
   # geom_point(data = merge_temps, aes(x = season, color = season, y = mu,
   #                                    alpha = type, shape = type)) +
-  geom_point(data = merge_temps_wint, aes(x = season, color = season, y = mu,
+  geom_point(data = paired_temps_wint, aes(x = season, color = season, y = mu,
                                           alpha = type, shape = type)) + 
   scale_color_manual(values = pal2, 
                      labels = c("Spring", "Fall", "Winter"),
@@ -839,6 +1018,32 @@ ggsave("../figures/hyp_winter/legend.png", hypWintLeg, width = 7, height = 0.5)
 ```
 
 # Breeding Season Transitions
+
+Get median dates of transitions
+```{r}
+#restrict to this study only
+
+median(na.omit(timing$departure))
+median(na.omit(timing$wint_arr_doy))
+median(na.omit(timing$wint_dep_doy))
+median(na.omit(timing$arrival))
+
+
+```
+Get range:
+```{r}
+range(na.omit(timing$departure))
+range(na.omit(timing$wint_arr_doy))
+range(na.omit(timing$wint_dep_doy))
+range(na.omit(timing$arrival))
+```
+Get range:
+```{r}
+sum(!is.na(timing$departure))
+sum(!is.na(timing$wint_arr_doy))
+sum(!is.na(timing$wint_dep_doy))
+sum(!is.na(timing$arrival))
+```
 
 ## Min temp
 
@@ -1089,4 +1294,3 @@ ggplot(wint_season) +
   theme_few() +
   theme(legend.position = "none")
 ```
-
