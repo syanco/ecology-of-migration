@@ -39,6 +39,7 @@ varCI <-function(x){
   return(ci)
 }
 
+#bootstrapped CI function
 bootMuCI <- function(x) {
   ci <- quantile(replicate(10000, mean(sample(na.omit(x), replace=TRUE))), 
                  probs=c(0.025, 0.975), na.rm = T) 
@@ -65,7 +66,7 @@ getLastN <- function(string, n){
   substr(string, nchar(string)-n+1, nchar(string))
 }
 
-#extract spring moevements only
+#extract spring movements only
 extractSpring <- function(birdID, move_data, doy_vec) {
   bird <- move_data[move_data$bird_year == birdID,]
   bird_spring <- bird[bird$event_doy >= as.numeric(min(doy_vec)) & 
@@ -152,6 +153,7 @@ rbind_sf <- function(list) {
   }
 }
 
+#function to assign seasons to fixes based on individual-specific phenology
 assignSeasonsInd <- function(df, time.df) {
   for(i in 1:nrow(df)) {
     start_breed <- time.df$first_on_terr_doy[time.df$bird == df$bird[i]]
@@ -376,7 +378,7 @@ medfunc <- function(d, i) {
   return(median(d2))
 }
 
-#Wald method to calc CIs for varianc estimates
+#Wald method to calc CIs for variance estimates
 varWaldCI <- function(x, level, df) {
   alph2 <- (1-level)/2
   qntls <- cbind(lower = qchisq(alph2, df, lower = F),
@@ -386,7 +388,7 @@ varWaldCI <- function(x, level, df) {
   return(CI)
 }
 
-#standalone legen function
+#standalone legend function
 g_legend<-function(a.gplot){
   tmp <- ggplot_gtable(ggplot_build(a.gplot))
   leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
@@ -464,6 +466,7 @@ CI_overlap <- function(ci_l, ci_h, data = NULL, df = F) {
   }
 }
 
+#variance of beta ditribution from mu and phi parameters
 varBeta <- function(mu, phi) {
   var <- (mu*(1-mu))/(1-phi)
   return(var)

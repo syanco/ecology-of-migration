@@ -14,6 +14,12 @@ Custom functions:
 source("functions.R")
 ```
 
+Suppress rgdal proj4 warnings (new since switch to proj6 and WKT fromat - no behavior changed)
+```{r}
+options("rgdal_show_exportToProj4_warnings"="none")
+```
+
+
 Libraries:
 
 ```{r}
@@ -38,7 +44,7 @@ Estimate key transition dates for all tracked birds to enable assignment of fixe
 Load in the .csv file containing  basic dates (as well as dates from Linkhart et al. 2016).
 
 ```{r}
-timing <- read.csv("../data/dep-arr_dates_01202021.csv", stringsAsFactors = F,
+timing <- read.csv("../data/dep-arr_dates_07222021.csv", stringsAsFactors = F,
                    na.strings = "NA")
 ```
 
@@ -59,7 +65,7 @@ timing$wint_dep_doy <- yday(as.Date(timing$wint_dep,
                                     format = "%m/%d/%y"))
 ```
 
-We can estimate the breeding season departure/arrival dates as the day between the last known on-territory fix and the first fix on migration:
+Estimate the breeding season departure/arrival dates as the day between the last known on-territory fix and the first fix on migration:
 ```{r}
 #take midpoints as departure or arrival date
 timing$departure <- (timing$last_on_terr_doy + timing$first_mig_doy)/2
@@ -82,7 +88,7 @@ id_time <- timing[timing$study_area == "ID",]
 ut_time <- timing[timing$study_area == "UT",]
 ```
 
-Define some "conservative" boundaries for population-level wintering and breeding so minimize the chance of any observations during this period being of en route migrants (e.g. start of winter = the last observed fall>winter transition and end of winter is earliest observed winter>spring transition):
+Define some conservative boundaries for population-level wintering and breeding so minimize the chance of any observations during this period being of en route migrants (e.g. start of winter = the last observed fall>winter transition and end of winter is earliest observed winter>spring transition):
 ```{r}
 start_breed <- max(na.omit(timing$arrival))
 end_breed <- min(na.omit(timing$departure))
@@ -181,6 +187,11 @@ mig_tracks <- readPinpoint(
   "../data/migration_gps/PinPoint 3068 2020-12-07 14-28-09.txt", 
   birdID = "03495", start = "19/8/03 00:05:01", stop = "20/7/01 00:00:01", 
   band = "1603-03495", breedyear = 2019, database = mig_tracks)
+
+mig_tracks <- readPinpoint(
+  "../data/migration_gps/PinPoint 3083 2021-07-07 10-59-39.txt",
+  birdID = "03291", start = "19/7/11 00:01:00", stop = "21/7/10 00:00:01",
+  band = "1603-03291", breedyear = 2019, database = mig_tracks)
 
 #### IDAHO ####
 
@@ -299,6 +310,10 @@ breed_3387 <- makeBreedVec("03387_2019", breed_loc, timing, mig_tracks,
 breed_3495 <- makeBreedVec("03495_2019", breed_loc, timing, mig_tracks, 
                            origin1 = "2019-01-01", origin2 = "2020-01-01",
                            thin = 8)
+breed_3291 <- makeBreedVec("03291_2019", breed_loc, timing, mig_tracks, 
+                           origin1 = "2019-01-01", origin2 = "2020-01-01",
+                           thin = 8)
+
 
 #ID
 breed_3480 <- makeBreedVec("03480_2019", breed_loc, timing, mig_tracks, 
@@ -312,9 +327,9 @@ breed_3483 <- makeBreedVec("03483_2019", breed_loc, timing, mig_tracks,
                            thin = 8)
 ```
 
-Now we can add these new breeding locations to the total data set (`mig_tracks_sf`) and then convert it to the same projection as the MODIS data (faster to convert the points than the huge raster stacks). We also clean out some intermediary objects again just to manage the global environment.
+Now we can add these new breeding locations to the total data set (`mig_tracks_sf`) and then convert it to the same projection as the MODIS data (faster to convert the points than the huge raster stacks). We also clean out some intermediary objects again just to manage the global environment size.
 
-Note, I've suppressed warnings here because it spits out a bunch about converting factors to characters but it works totally fine.
+Note, I've suppressed warnings here because it spits out a bunch about converting factors to characters.
 ```{r warning=FALSE}
 #combine interpolated breeding positions with recorded fixes
 mig_tracks_new <- rbind_sf(plyr::compact(list(mig_tracks_sf, 
@@ -326,7 +341,7 @@ mig_tracks_new <- rbind_sf(plyr::compact(list(mig_tracks_sf,
                                               
                                               breed_3489, breed_3503, 
                                               breed_3504, breed_3387, 
-                                              breed_3495,
+                                              breed_3495, breed_3291,
                                               
                                               breed_3480, breed_3482, 
                                               breed_3483)))
@@ -340,7 +355,7 @@ mig_tracks_sinu <- st_transform(mig_tracks_new,
 rm(a41_breed, a44_breed, a43_breed, cng1_breed, bg5_breed, 
    rp15_breed, cp11_16_breed, cp11_18_breed, cp1_breed, 
    breed_3489, breed_3503, breed_3504, breed_3387, breed_3495, 
-   breed_3480, breed_3482, breed_3483,
+   breed_3480, breed_3482, breed_3483, breed_3291,
    mig_tracks_new)
 ```
 
@@ -382,6 +397,8 @@ wint_3387 <- makeWintVec("03504_2019", timing, mig_tracks_sinu,
                          dist_thresh = 1000)
 wint_3495 <- makeWintVec("03495_2019", timing, mig_tracks_sinu,
                          dist_thresh = 1000)
+wint_3291 <- makeWintVec("03291_2019", timing, mig_tracks_sinu,
+                         dist_thresh = 1000)
 
 
 #ID
@@ -393,7 +410,7 @@ wint_3483 <- makeWintVec("03483_2019", timing, mig_tracks_sinu,
                          dist_thresh = 1000)
 ```
 
-Now we add these points into the total data set as well - note that because the winter imputation uses the collected data, and we did this after we had converted those data to the sinu projection, we need to add sinu to sinu here.  Again, we'll clean some objects out.
+Now we add these points into the total data set as well - note that because the winter imputation uses the collected data, and we did this after we had converted those data to the sinu projection, we need to add sinu to sinu here.  Again, we'll clean some objects out to manage memory.
 ```{r warning=FALSE}
 #add the interpolated winter points to the dataset
 #(must be the same projection as the dataset fed into `makeWintVec`)
@@ -406,7 +423,7 @@ mig_tracks_sinu <- rbind_sf(plyr::compact(list(mig_tracks_sinu,
                                                cp11_18_wint, cp1_wint,
                                                
                                                wint_3489, wint_3503, wint_3504,
-                                               wint_3387, wint_3495,
+                                               wint_3387, wint_3495, wint_3291,
                                                
                                                wint_3480, wint_3482, 
                                                wint_3483)))
@@ -415,7 +432,7 @@ mig_tracks_sinu <- rbind_sf(plyr::compact(list(mig_tracks_sinu,
 rm(a41_wint, a44_wint, a43_wint, cng1_wint, b5_wint,
    rp15_wint, cp11_16_wint, cp11_18_wint, cp1_wint, 
    wint_3489, wint_3503, wint_3504, wint_3387, wint_3495,
-   wint_3480, wint_3482, wint_3483)
+   wint_3480, wint_3482, wint_3483, wint_3291)
 ```
 
 ### Counterfactual summer fixes
@@ -501,6 +518,12 @@ hyp_3495 <- makeHypoBreed("03495_2019", timing, mig_tracks_sinu,
                                                 format = "%m/%d/%Y"), 
                           hyporigin = as.Date("01/01/2020", 
                                               format = "%m/%d/%Y"), thin = 8)
+hyp_3291 <- makeHypoBreed("03291_2019", timing, mig_tracks_sinu, 
+                          trackorigin = as.Date("01/01/2019", 
+                                                format = "%m/%d/%Y"), 
+                          hyporigin = as.Date("01/01/2020", 
+                                              format = "%m/%d/%Y"), thin = 8)
+
 
 #ID
 hyp_3480 <- makeHypoBreed("03480_2019", timing, mig_tracks_sinu, 
@@ -530,7 +553,7 @@ mig_tracks_hypo <- rbind_sf(plyr::compact(list(a41_hyp, a44_hyp, a43_hyp,
                                                cp11_18_hyp, cp1_hyp, 
                                                
                                                hyp_3489, hyp_3503, hyp_3504, 
-                                               hyp_3387, hyp_3495,
+                                               hyp_3387, hyp_3495, hyp_3291,
                                                
                                                hyp_3480, hyp_3482, hyp_3483)))
 
@@ -579,6 +602,8 @@ hypo_wint_3387 <- makeHypoWint("03387_2019", breed_loc, timing,
                                origin = "2019-01-01", thin = 8)
 hypo_wint_3495 <- makeHypoWint("03495_2019", breed_loc, timing, 
                                origin = "2019-01-01", thin = 8)
+hypo_wint_3291 <- makeHypoWint("03291_2019", breed_loc, timing, 
+                               origin = "2019-01-01", thin = 8)
 
 #ID
 hypo_wint_3480 <- makeHypoWint("03480_2019", breed_loc, timing, 
@@ -596,6 +621,7 @@ mig_tracks_hypo_wint <- rbind_sf(plyr::compact(list(
   a41_hypo_wint, a44_hypo_wint,  a43_hypo_wint, cng1_hypo_wint, bg5_hypo_wint,
   rp15_hypo_wint, cp11_16_hypo_wint, cp11_18_hypo_wint, cp1_hypo_wint, 
   hypo_wint_3489, hypo_wint_3503, hypo_wint_3504, hypo_wint_3387, hypo_wint_3495,
+  hypo_wint_3291,
   hypo_wint_3480, hypo_wint_3482, hypo_wint_3483)))
 
 #transform into same projection as MODIS data
@@ -618,25 +644,31 @@ breed_loc_sf <- st_as_sf(breed_loc, coords = c("x","y"),  crs = 26913)
 
 #ectract centroids for each study area
 mef_cent <- st_combine(breed_loc_sf[breed_loc_sf$study_area=="MEF",]) %>% 
-  st_centroid() %>% 
   st_transform(crs = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 
                                 +a=6371007.181 +b=6371007.181 +units=m 
-                                +no_defs")
+                                +no_defs") %>% 
+  st_sf() %>% 
+  st_centroid()
+
 hc_cent <- st_combine(breed_loc_sf[breed_loc_sf$study_area=="HC",]) %>% 
-  st_centroid()%>% 
   st_transform(crs = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 
                                 +a=6371007.181 +b=6371007.181 +units=m 
-                                +no_defs")
+                                +no_defs") %>% 
+  st_sf() %>% 
+  st_centroid() 
+
 ut_cent <- st_combine(breed_loc_sf[breed_loc_sf$study_area=="UT",]) %>% 
-  st_centroid()%>% 
   st_transform(crs = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 
                                 +a=6371007.181 +b=6371007.181 +units=m 
-                                +no_defs")
+                                +no_defs") %>% 
+  st_sf() %>% 
+  st_centroid() 
 id_cent <- st_combine(breed_loc_sf[breed_loc_sf$study_area=="ID",]) %>% 
-  st_centroid()%>% 
   st_transform(crs = "+proj=sinu +lon_0=0 +x_0=0 +y_0=0 
                                 +a=6371007.181 +b=6371007.181 +units=m 
-                                +no_defs")
+                                +no_defs") %>% 
+  st_sf() %>% 
+  st_centroid() 
 
 #make sp versions for MODIS_extract
 hc_cent_sp <- as_Spatial(hc_cent)
@@ -713,10 +745,6 @@ for(i in 2:length(ext2)){
 
 fnamesQA <- fnamesQA[-which(check==F)[1]]
 nt_QA <- raster::stack(fnamesQA)
-
-# 
-# #there is missing QA data at index 471 so we'll drop the temp data for that day
-# nt_ts <- nt_ts[[-471]]
 
 #remove the legacy `raster_ts` object just to minimize how many gigantic objects we currently have in ram...
 rm(raster_ts)
@@ -841,7 +869,6 @@ temp_df <- temp_df %>%
 #need to also remove clearly erroneous readings from 7/31/2017
 temp_df <- filter(temp_df, date != "2017-07-31")
 ```
-
 
 ## Extract and process NDVI 
 ```{r}
@@ -1041,7 +1068,6 @@ ndvi_hypo <- sapply(1:nrow(mig_tracks_hypo), getNDVI,
 ndvi_hypo <- ndvi_hypo*.0001
 ```
 
-
 Gather into `data.frame`.
 ```{r}
 ndvi_hypo_df <- data.frame("ndvi" = ndvi_hypo, 
@@ -1115,7 +1141,7 @@ merge_ndvi$type <- c(rep("hypo", nrow(hypondvisummary)),
 merge_ndvi <- merge_ndvi %>% 
   filter(season != "winter") %>% 
   filter(!is.na(sd))
-         # & bird != "A43_2016" & bird != "CNG1_2018")
+# & bird != "A43_2016" & bird != "CNG1_2018")
 ```
 Remove "unpaired" birds (no sim matching real in a season)
 
@@ -1147,7 +1173,6 @@ hypo_temps_wint <- sapply(1:nrow(mig_tracks_hypo_wint[
 ```
 
 Gather into `data.frame`.
-
 ```{r}
 hypo_temp_wint_df <- data.frame("temp" = nasaToCelcius(hypo_temps_wint), 
                                 "doy" = yday(as.Date(mig_tracks_hypo_wint$date[
@@ -1225,8 +1250,7 @@ merge_temps_wint <- merge_temps_wint %>%
   filter(!is.na(sd))
 # & bird != "A43_2016" & bird != "CNG1_2018")
 ```
-Remove "unpaired" birds (no sim matching real in a season)
-
+Remove "unpaired" birds (no sim matching real in a season).
 ```{r}
 paired_3 <- merge_temps_wint %>% 
   group_by(bird, season) %>% 
@@ -1341,7 +1365,6 @@ paired_ndvi_wint <- merge_ndvi_wint %>%
 
 ## Min Temp
 
-
 ```{r}
 co_temp <- read.csv("../data/co_temp.csv")
 idut_temp <- read.csv("../data/ut_id_temp.csv")
@@ -1364,7 +1387,6 @@ comb_temp$doy <- yday(comb_temp$DATE)
 comb_temp$y <- as.factor(year(comb_temp$DATE))
 ```
 
-
 Break into separate study areas
 ```{r}
 comb_temp_split <- split(comb_temp, comb_temp$NAME)
@@ -1376,9 +1398,9 @@ comb_temp_split <- split(comb_temp, comb_temp$NAME)
 ### Hot Creek
 
 Pull time series of NDVI values for Hot Creek breeding centroid dating back to 1999/2000
-#Still need to add QA filter here
 ```{r}
-HC_ndvi_ts <- MODIStsp_extract(in_rts = HC_ndvi, sf_object = hc_cent, 
+HC_ndvi_ts <- MODIStsp_extract(in_rts = HC_ndvi, 
+                               sf_object = hc_cent, 
                                out_format = "dframe")
 HC_ndvi_ts$`1` <- HC_ndvi_ts$`1`*.0001
 HC_ndvi_ts$ndvi <- HC_ndvi_ts$`1`
@@ -1388,7 +1410,6 @@ HC_ndvi_ts$doy <- yday(HC_ndvi_ts$date)
 ### MEF
 
 Pull time series of NDVI values for MEF breeding centroid dating back to 1999/2000
-Still need to add QA filter here
 ```{r}
 MEF_ndvi_ts <- MODIStsp_extract(in_rts = MEF_ndvi, sf_object = mef_cent, 
                                 out_format = "dframe")
@@ -1418,10 +1439,8 @@ wclim_4_crop <- crop(wclim[[4]], extent(matrix(c(-110, -90, 40, 10),
 
 Load in eBird data
 ```{r}
-ebd_flow <- read_ebd("../ebd_flaowl_relAug-2019/ebd_flaowl_relAug-2019.txt")
-
+ebd_flow <- read_ebd("../data/ebd_flaowl_relAug-2019/ebd_flaowl_relAug-2019.txt")
 ```
-
 
 Create DOY and year variables
 ```{r}
@@ -1431,7 +1450,7 @@ ebd_flow$obs_doy <- yday(ebd_flow$observation_date)
 ebd_flow$obs_year <- year(ebd_flow$observation_date)
 ```
 
-Create season variable (and convert to factor).  USe the transition dates created above that are the most conservative possible relative to winter - i.e., if any birds could have been migrating we'll call it migration - so we minimize the winter period so that we are VERY confident that records assigned to winter are truly winter residency period.
+Create season variable (and convert to factor).  Use the transition dates created above that are the most conservative possible relative to winter - i.e., if any birds could have been migrating we'll call it migration - so we minimize the winter period so that we are confident that records assigned to winter are truly winter residency period.
 ```{r}
 # create season factor variable
 ebd_flow$season <- sapply(ebd_flow$obs_doy, FUN = assignSeasons, 
@@ -1451,11 +1470,9 @@ ebd_sf <- st_as_sf(ebd_flow,
                    crs = 4326) 
 ```
 
-
 # Save
 
 Save out the items we need to be loaded in separate analysis script:
-
 ```{r}
 save(ndvi_df, temp_df, 
      hypo_temp_df, ndvi_hypo_df, 
@@ -1467,17 +1484,19 @@ save(ndvi_df, temp_df,
      mig_tracks_line,
      tempsummary, ndvisummary,
      hypotempsummary, hypondvisummary,
-     # hc_time, mef_time,
+     hc_time, mef_time,
      timing,
      MEF_ndvi, 
-     # MEF_ndvi_ts,
+     MEF_ndvi_ts,
      HC_ndvi, 
-     # HC_ndvi_ts,
+     HC_ndvi_ts,
      paired_ndvi,
      paired_temps,
      paired_temps_wint,
      paired_ndvi_wint,
      merge_temps_wint,
      merge_temps,
+     comb_temp_split,
+     ebd_sf,
      file = paste0("../out/extract_", Sys.Date(), ".Rdata"))
 ```

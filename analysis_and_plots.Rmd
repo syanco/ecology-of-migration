@@ -45,7 +45,7 @@ library(fpp2)
 Load data from previous script (rather than source data load and processing script which is very time consuming).
 
 ```{r}
-load("../out/extract_2021-01-21.Rdata")
+load("../out/extract_2021-07-23.Rdata")
 source("./functions.R")
 ```
 
@@ -138,7 +138,9 @@ ggsave("../figures/trackmap.png", trackmap)
 temp_df$date2 <- as.numeric(temp_df$date)
 temp_df$season <- fct_relevel(temp_df$season, 
                               c("spring", "summer", "fall", "winter"))
+```
 
+```{r}
 get_prior(bf(temp ~ 0 + season + (1|bird) + ar(time = date2, p = 2, gr = bird, cov = F), 
              sigma ~ 0 +season, family = gaussian()), data = temp_df)
 
@@ -162,39 +164,12 @@ temp_df %>%
   ggplot(aes(sample = z_residual)) +
   geom_qq() +
   geom_abline()
-
-# macf(residuals(fit_temp, summary = FALSE), lag.max = 10)
-```
-
-```{r}
-mcmc_plot(fit_temp, type = "acf_bar")
 ```
 
 Prior predictive check
 ```{r}
 pp_check(fit_temp, nsamples = 100)
 ```
-
-Margianls
-```{r}
-mmp_brm(fit_temp, x = "season", prob = .95)
-```
-
-
-
-Look at residuals and autocorrelation
-```{r}
-resid <- resid(fit_temp, type = "pearson")[, "Estimate"]
-n <- length(resid)
-resid[-1] <- resid[-1] - (resid[-n] * mean(as.matrix(fit_temp)[,
-    "ar[1]"]))
-fit <- fitted(fit_temp)[, "Estimate"]
-
-ggplot() + geom_point(data = NULL, aes(y = resid, x = fit))
-plot(acf(resid, lag = 40))
-```
-
-
 ### Summarize
 
 ```{r}
@@ -225,14 +200,11 @@ print("Var")
 CI_overlap(ci_l = "CI_l", ci_h = "CI_h", data = temp_mod_var_df)
 ```
 
-
-
 ## Plots
 Create 4-color palette: 
 ```{r}
 pal <- c("#4daf4a", "#e41a1c", "#984ea3", "#377eb8")
 ```
-
 
 Reorder some factors for plotting
 ```{r}
@@ -353,7 +325,7 @@ get_prior(bf(ndvi ~ 0 + season + (1|bird) + ar(time = date2, gr = bird, cov = T)
 
 fit_ndvi <- brm(bf(ndvi ~ 0 + season + (1|bird) + ar(time = date2, gr = bird, cov = T), 
              phi ~ 0 + season, family = Beta()), data = ndvi_df, 
-             chains = 2, iter = 1000, cores = getOption("mc.cores", 3),
+             chains = 3, iter = 1000, cores = getOption("mc.cores", 3),
              control = list(adapt_delta = 0.99))
 fit_ndvi
 
@@ -361,21 +333,10 @@ inv_logit_scaled(fixef(fit_ndvi))
 
 ```
 
-
-```{r}
-resid <- resid(fit_ndvi, type = "pearson")[, "Estimate"]
-n <- length(resid)
-resid[-1] <- resid[-1] - (resid[-n] * mean(as.matrix(fit_ndvi)[,
-    "ar[1]"]))
-fit <- fitted(fit_ndvi)[, "Estimate"]
-
-ggplot() + geom_point(data = NULL, aes(y = resid, x = fit))
-plot(acf(resid, lag = 40))
-```
 ```{r}
 #quantile residuals
 ndvi_df %>%
-  mutate(date = as.numeric(date)) %>% 
+  mutate(date2 = as.numeric(date)) %>% 
   add_predicted_draws(fit_ndvi, n=1000) %>%
   summarise(
     p_residual = mean(.prediction < ndvi),
@@ -393,60 +354,6 @@ Prior predictive check
 pp_check(fit_ndvi, nsamples = 100)
 ```
 
-Modeled as normal.. 
-```{r}
-
-fit_ndvi_2 <- brm(bf(ndvi ~ 0 + season + (1|bird) + ar(time = date2, gr = bird, cov = F), 
-             sigma ~ 0 + season, family = gaussian()), data = ndvi_df, 
-             chains = 4, iter = 1000, cores = getOption("mc.cores", 3)) 
-
-fit_ndvi_2
-```
-```{r}
-resid <- resid(fit_ndvi_2, type = "pearson")[, "Estimate"]
-n <- length(resid)
-resid[-1] <- resid[-1] - (resid[-n] * mean(as.matrix(fit_ndvi_2)[,
-    "ar[1]"]))
-fit <- fitted(fit_ndvi_2)[, "Estimate"]
-
-ggplot() + geom_point(data = NULL, aes(y = resid, x = fit))
-plot(acf(resid, lag = 40))
-```
-```{r}
-#quantile residuals
-ndvi_df %>%
-  mutate(date = as.numeric(date)) %>% 
-  add_predicted_draws(fit_ndvi_2, n=1000) %>%
-  summarise(
-    p_residual = mean(.prediction < ndvi),
-    z_residual = qnorm(p_residual)
-  ) %>%
-  ggplot(aes(sample = z_residual)) +
-  geom_qq() +
-  geom_abline()
-
-# macf(residuals(fit_temp, summary = FALSE), lag.max = 10)
-```
-
-Prior predictive check
-```{r}
-pp_check(fit_ndvi_2, nsamples = 100)
-```
-
-### Model performance checks
-
-```{r}
-resid <- resid(fit_ndvi, type = "pearson")[, "Estimate"]
-n <- length(resid)
-resid[-1] <- resid[-1] - (resid[-n] * mean(as.matrix(fit_ndvi)[,
-    "ar[1]"]))
-fit <- fitted(fit_ndvi)[, "Estimate"]
-
-ggplot() + geom_point(data = NULL, aes(y = resid, x = fit))
-plot(acf(resid, lag = 40))
-```
-
-
 ### Summarize
 
 ```{r}
@@ -456,18 +363,22 @@ ndvi_fixed <- fixef(fit_ndvi)
                           est = inv_logit_scaled(ndvi_fixed[1:4,1]),
                           CI_l = inv_logit_scaled(ndvi_fixed[1:4,3]),
                           CI_h = inv_logit_scaled(ndvi_fixed[1:4,4]),
-                          season = c("spring", "summer", "fall", "winter"),
-                          row_names = rownames(ndvi_fixed)[1:4]))
+                          # season = c("spring", "summer", "fall", "winter"),
+                          row_names = rownames(ndvi_fixed)[1:4],
+                          season = sub("season", "", ndvi_mod_mu_df$row_names)
+                          ))
 
 (ndvi_mod_var_df <- data.frame(param = rep("var", 4),
                           est = 1/ndvi_fixed[5:8],
                           CI_l = 1/ndvi_fixed[5:8,4],
                           CI_h = 1/ndvi_fixed[5:8,3],
-                          season = c("spring", "summer", "fall", "winter"),
-                          row_names = rownames(ndvi_fixed)[5:8]))
+                          row_names = rownames(ndvi_fixed)[5:8],
+                          season = sub("phi_season", "", ndvi_mod_var_df$row_names)
+                          ))
 
 
 ```
+
 Check CI overlap:
 ```{r}
 print("Mu")
@@ -491,30 +402,6 @@ CI_overlap(ci_l = "CI_l", ci_h = "CI_h", data = ndvi_mod_var_df)
                           # CI_l_2 = NA,
                           # CI_h_2 = NA
                           ))
-
-# #hacky code to deal with offsets - remove once model refitted through intercept
-# for (i in 3:nrow(ndvi_mod_df)) {
-#   if(ndvi_mod_df$param[i] == "mu"){
-#     ndvi_mod_df$est_2[i] <- ndvi_mod_df$est[i] + ndvi_mod_df$est[1]
-#     ndvi_mod_df$CI_l_2[i] <- ndvi_mod_df$CI_l[i] + ndvi_mod_df$CI_l[1]
-#     ndvi_mod_df$CI_h_2[i] <- ndvi_mod_df$CI_h[i] + ndvi_mod_df$CI_h[1]
-# 
-#   }  else {
-#     ndvi_mod_df$est_2[i] <- ndvi_mod_df$est[i] + ndvi_mod_df$est[2]
-#     ndvi_mod_df$CI_l_2[i] <- ndvi_mod_df$CI_l[i] + ndvi_mod_df$CI_l[2]
-#     ndvi_mod_df$CI_h_2[i] <- ndvi_mod_df$CI_h[i] + ndvi_mod_df$CI_h[2]
-#   }
-# }
-# 
-# ndvi_mod_df$est_2[1] <- ndvi_mod_df$est[1]
-# ndvi_mod_df$est_2[2] <- ndvi_mod_df$est[2]
-# 
-# ndvi_mod_df$CI_l_2[1] <- ndvi_mod_df$CI_l[1]
-# ndvi_mod_df$CI_l_2[2] <- ndvi_mod_df$CI_l[2]
-# 
-# ndvi_mod_df$CI_h_2[1] <- ndvi_mod_df$CI_h[1]
-# ndvi_mod_df$CI_h_2[2] <- ndvi_mod_df$CI_h[2]
-
 ```
 
 ## Plots
@@ -553,13 +440,12 @@ Now plot panel A - raw NDVI.
 ```
 
 Plot panel B - estimated means from the model
-# CHANGE EST_2 TO EST AFTER REFITTING MODEL THROUGH INTERECPT
 ```{r fig.width=3.5, fig.height=3}
 (meanndvi <- ggplot(ndvi_mod_mu_df) +
   geom_point(aes(x = season, y = est, colour = season), size = 1.5) +
   geom_errorbar(aes(x = season, ymax = CI_h, ymin = CI_l, colour = season), 
                 width =.5, size = .5) +
-  # scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
+  scale_x_discrete(labels = c("Spring", "Summer", "Fall", "Winter")) +
   scale_colour_manual(values = pal) +
   annotate(geom="text", x=4.2, y=.95, label="B", size = 7) +
   ylim(0, 1) +
@@ -602,17 +488,19 @@ ggsave("../figures/ndvi_fig.pdf", plot = ntfig)
 ggsave("../figures/ndvi_fig.png", ntfig)
 ```
 
-## Save Model Objects 
+## Save/Load Model Objects 
 ```{r}
 save(
-  fit_ndvi, 
+  fit_ndvi,
   fit_temp,
-  # fit_ndvi_2, 
+  # fit_ndvi_2,
   file = paste0("../out/model_fits_", Sys.Date(), ".Rdata"))
+
+# load("../out/model_fits_2021-01-25.Rdata")
 ```
 
-
 #Counterfactual Breeding
+
 ## Counterfactual NT
 
 ```{r}
@@ -623,7 +511,6 @@ merge_temps$season <- fct_relevel(merge_temps$season,
 paired_temps$season <- fct_relevel(paired_temps$season, 
                                   c("spring", "summer", "fall", "winter"))
 ```
-
 
 Make a plot of raw temps with raw hypo temps.
 ```{r fig.width=3.5, fig.height=3}
@@ -678,6 +565,7 @@ ggsave("../figures/hyp_summer/rawNT.png", rawhypoNT, width = 3.5, height = 3)
    xlab("Season") +
    facet_grid(cols = vars(season), scales = "free"))
 ```
+
 Get mean pairwise difference:
 ```{r}
 mean_pair_NT <- paired_temps %>% 
@@ -708,7 +596,6 @@ paired_ndvi$season <- fct_relevel(paired_ndvi$season,
                                  c("spring", "summer", "fall", "winter"))
 ```
 
-
 Make a plot of raw temps with raw hypo temps.
 ```{r fig.width=3.5, fig.height=3}
 (rawhypoNDVI <- ggplot() +
@@ -729,7 +616,6 @@ Make a plot of raw temps with raw hypo temps.
 ggsave("../figures/hyp_summer/rawNDVI.png", rawhypoNDVI, width = 3.5, height = 3)
 ```
 
-
 ```{r fig.width=3.5, fig.height=3}
 season.names <- c("Spring", "Summer", "Fall")
 names(season.names) <- c("spring", "summer", "fall")
@@ -739,7 +625,7 @@ names(season.names) <- c("spring", "summer", "fall")
     #real points and error bars
     geom_errorbar(data = paired_ndvi[paired_ndvi$type == "real",],
                   aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, group = bird), 
-                  width = .3, size = 1, color = "black", alpha = 0.4,
+                  width = .5, size = .5, color = "black", alpha = 0.4,
                   position=position_dodge(width=0.9)) +
     geom_point(data = paired_ndvi[paired_ndvi$type == "real",],
                aes(x = season, y = mu, group = bird),
@@ -750,7 +636,7 @@ names(season.names) <- c("spring", "summer", "fall")
     geom_errorbar(data = paired_ndvi[paired_ndvi$type == "hypo",],
                   aes(x = season, ymax = mu.CI.h, ymin = mu.CI.l, 
                       color = season, group = bird),
-                  width = .3, size = 1, position=position_dodge(width=0.9)) +
+                  width = .5, size = 0.5, position=position_dodge(width=0.9)) +
     geom_point(data = paired_ndvi[paired_ndvi$type == "hypo",],
                aes(x = season, y = mu, color = season, group = bird),
                size = 1.5, position=position_dodge(width=0.9)) +
@@ -990,7 +876,9 @@ t.test(mean_pair_ndvi_wint$winter_hypo, mean_pair_ndvi_wint$winter_real, paired 
 #fall
 t.test(mean_pair_ndvi_wint$fall_hypo, mean_pair_ndvi_wint$fall_real, paired = T)
 ```
+
 ## Common legend
+
 Extract common legend.
 
 ```{r fig.width=7, fig.height = 0.5}
@@ -1021,15 +909,12 @@ ggsave("../figures/hyp_winter/legend.png", hypWintLeg, width = 7, height = 0.5)
 
 Get median dates of transitions
 ```{r}
-#restrict to this study only
-
 median(na.omit(timing$departure))
 median(na.omit(timing$wint_arr_doy))
 median(na.omit(timing$wint_dep_doy))
 median(na.omit(timing$arrival))
-
-
 ```
+
 Get range:
 ```{r}
 range(na.omit(timing$departure))
@@ -1037,6 +922,7 @@ range(na.omit(timing$wint_arr_doy))
 range(na.omit(timing$wint_dep_doy))
 range(na.omit(timing$arrival))
 ```
+
 Get range:
 ```{r}
 sum(!is.na(timing$departure))
@@ -1049,34 +935,38 @@ sum(!is.na(timing$arrival))
 
 First build GAMs of minimum daily  temps
 ```{r}
-#build GAM of temp for local weather stations (Platoro-HC, Florissant-MEF)
-fm_flor <- gam(TMIN ~ s(doy), data = flor_tmin)
-fm_plat <- gam(TMIN ~ s(doy), data = platoro)
+mef_temp <- comb_temp_split$`CHEESEMAN COLORADO, CO US`
+hc_temp <- comb_temp_split$`BIG HORN COLORADO, CO US`
 
-summary(fm_flor)
-summary(fm_plat)
+
+#build GAM of temp for local weather stations (Platoro-HC, Florissant-MEF)
+fm_mef <- gam(TMIN ~ s(doy), data = mef_temp)
+fm_hc <- gam(TMIN ~ s(doy), data = hc_temp)
+
+summary(fm_mef)
+summary(fm_hc)
 #extract fitted values of gams
-pred_flor <- predict_gam(fm_flor, length_out = 366)
-pred_plat <- predict_gam(fm_plat, length_out = 366)
+pred_mef <- predict_gam(fm_mef, length_out = 366)
+pred_hc <- predict_gam(fm_hc, length_out = 366)
 ```
 
 ```{r}
 #extract fitted temp value that matches median departure/arrival dates
 
 #HC
-(hc_dep <- pred_plat$fit[pred_plat$doy == median(na.omit(hc_time$departure))])
-(hc_arr <- pred_plat$fit[pred_plat$doy == median(na.omit(hc_time$arrival))])
+(hc_dep <- pred_hc$fit[pred_hc$doy == median(na.omit(hc_time$departure))])
+(hc_arr <- pred_hc$fit[pred_hc$doy == median(na.omit(hc_time$arrival))])
 (hc_dif <- hc_dep-hc_arr)
 ```
 ```{r}
-(mef_dep <- pred_flor$fit[pred_flor$doy == median(na.omit(mef_time$departure))])
-(mef_arr <- pred_flor$fit[pred_flor$doy == median(na.omit(mef_time$arrival))])
+(mef_dep <- pred_mef$fit[pred_mef$doy == median(na.omit(mef_time$departure))])
+(mef_arr <- pred_mef$fit[pred_mef$doy == median(na.omit(mef_time$arrival))])
 (mef_dif <- mef_dep-mef_arr)
 
-max(pred_flor$fit) - min(pred_flor$fit)
-max(pred_plat$fit) - min(pred_plat$fit)
-max(pred_flor$fit)
-max(pred_plat$fit)
+max(pred_mef$fit) - min(pred_mef$fit)
+max(pred_hc$fit) - min(pred_hc$fit)
+max(pred_mef$fit)
+max(pred_hc$fit)
 
 ```
 
@@ -1085,10 +975,10 @@ Plot models with transition dates
 ```{r fig.width=3.5, fig.height=2}
 (#plot HC min temps (GAM) with departures and arrivals
 hc_plot <- ggplot() +
-  geom_ribbon(data = pred_plat, 
+  geom_ribbon(data = pred_hc, 
               aes(ymin = (fit-se.fit), ymax = (fit+se.fit), x = doy), 
               color = "gray", alpha = 0.25) +
-  geom_line(data = pred_plat, aes(x = doy, y = fit), inherit.aes = F) +
+  geom_line(data = pred_hc, aes(x = doy, y = fit), inherit.aes = F) +
   geom_vline(data = hc_time, aes(xintercept = departure), color = "red") +
   geom_vline(data = hc_time,
              aes(xintercept = median(na.omit(departure))), size = 1) +
@@ -1105,10 +995,10 @@ hc_plot <- ggplot() +
 
 #plot MEF min temps (GAM) with departures and arrivals
 (mef_plot <- ggplot() +
-  geom_ribbon(data = pred_flor, 
+  geom_ribbon(data = pred_mef, 
               aes(ymin = (fit-se.fit), ymax = (fit+se.fit), x = doy), 
               color = "gray", alpha = 0.25) +
-  geom_line(data = pred_flor, aes(x = doy, y = fit), inherit.aes = F) +
+  geom_line(data = pred_mef, aes(x = doy, y = fit), inherit.aes = F) +
   geom_vline(data = mef_time, aes(xintercept = departure), color = "red") +
   geom_vline(data = mef_time,
              aes(xintercept = median(departure)), size = 1) +
@@ -1140,8 +1030,6 @@ fm_MEF_ndvi <- gam(ndvi ~ s(doy), data = MEF_ndvi_ts)
 #extract fitted values of gams
 pred_HC_ndvi <- predict_gam(fm_HC_ndvi, values = list(doy = 1:366))
 pred_MEF_ndvi <- predict_gam(fm_MEF_ndvi, values = list(doy = 1:366))
-
-
 ```
 
 ```{r}
