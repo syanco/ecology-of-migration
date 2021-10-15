@@ -49,7 +49,7 @@ load("../out/extract_2021-07-23.Rdata")
 source("./functions.R")
 ```
 
-# Figure S1 - Track Map
+# Figure 1 - Track Map
 
 Make a map with all the tracks combined.  First we load in some background layers.
 
@@ -127,7 +127,7 @@ cbbPalette <- c("#000000", "#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2"
   xlab("") +
   ylab(""))
 
-ggsave("../figures/trackmap.png", trackmap)
+ggsave("../figures/trackmap.pdf", trackmap, dpi = 600)
 ```
 
 # Experienced NT
@@ -148,22 +148,6 @@ fit_temp <- brm(bf(temp ~ 0 + season + (1|bird) + ar(time = date2, p = 2, gr = b
              sigma ~ 0 + season, family = gaussian()), data = temp_df, 
              chains = 3, iter = 1000, cores = getOption("mc.cores", 3))
 fit_temp
-```
-
-### Model performance checks:
-
-```{r}
-#quantile residuals
-temp_df %>%
-  mutate(date = as.numeric(date)) %>% 
-  add_predicted_draws(fit_temp, n=1000) %>%
-  summarise(
-    p_residual = mean(.prediction < temp),
-    z_residual = qnorm(p_residual)
-  ) %>%
-  ggplot(aes(sample = z_residual)) +
-  geom_qq() +
-  geom_abline()
 ```
 
 Prior predictive check
@@ -191,6 +175,7 @@ temp_fixed <- fixef(fit_temp)
 
 
 ```
+
 Check CI overlap:
 ```{r}
 print("Mu")
@@ -295,8 +280,8 @@ ntfig <- arrangeGrob(
                         c(3, 4))
 )
 
-ggsave("../figures/nT_fig.pdf", ntfig)
-ggsave("../figures/nT_fig.png", ntfig)
+ggsave("../figures/nT_fig.pdf", ntfig, dpi = 600)
+ggsave("../figures/nT_fig.png", ntfig, dpi = 600)
 
 ```
 
@@ -317,7 +302,6 @@ ndvi_df$date2 <- as.numeric(temp_df$date)
 ndvi_df$bird <- factor(ndvi_df$bird)
 ```
 
-
 First fit the models.
 ```{r}
 get_prior(bf(ndvi ~ 0 + season + (1|bird) + ar(time = date2, gr = bird, cov = T), 
@@ -333,21 +317,6 @@ inv_logit_scaled(fixef(fit_ndvi))
 
 ```
 
-```{r}
-#quantile residuals
-ndvi_df %>%
-  mutate(date2 = as.numeric(date)) %>% 
-  add_predicted_draws(fit_ndvi, n=1000) %>%
-  summarise(
-    p_residual = mean(.prediction < ndvi),
-    z_residual = qnorm(p_residual)
-  ) %>%
-  ggplot(aes(sample = z_residual)) +
-  geom_qq() +
-  geom_abline()
-
-# macf(residuals(fit_temp, summary = FALSE), lag.max = 10)
-```
 
 Prior predictive check
 ```{r}
@@ -365,7 +334,7 @@ ndvi_fixed <- fixef(fit_ndvi)
                           CI_h = inv_logit_scaled(ndvi_fixed[1:4,4]),
                           # season = c("spring", "summer", "fall", "winter"),
                           row_names = rownames(ndvi_fixed)[1:4],
-                          season = sub("season", "", ndvi_mod_mu_df$row_names)
+                          season = sub("season", "", rownames(ndvi_fixed)[1:4])
                           ))
 
 (ndvi_mod_var_df <- data.frame(param = rep("var", 4),
@@ -373,7 +342,7 @@ ndvi_fixed <- fixef(fit_ndvi)
                           CI_l = 1/ndvi_fixed[5:8,4],
                           CI_h = 1/ndvi_fixed[5:8,3],
                           row_names = rownames(ndvi_fixed)[5:8],
-                          season = sub("phi_season", "", ndvi_mod_var_df$row_names)
+                          season = sub("phi_season", "", rownames(ndvi_fixed)[5:8])
                           ))
 
 
@@ -484,8 +453,8 @@ ntfig <- arrangeGrob(
                         c(3, 4))
 )
 
-ggsave("../figures/ndvi_fig.pdf", plot = ntfig)
-ggsave("../figures/ndvi_fig.png", ntfig)
+ggsave("../figures/ndvi_fig.pdf", plot = ntfig, dpi = 600)
+ggsave("../figures/ndvi_fig.png", ntfig, dpi = 600)
 ```
 
 ## Save/Load Model Objects 
@@ -529,7 +498,7 @@ Make a plot of raw temps with raw hypo temps.
    theme(legend.position = "none"))
 ```
 ```{r}
-ggsave("../figures/hyp_summer/rawNT.png", rawhypoNT, width = 3.5, height = 3)
+ggsave("../figures/hyp_summer/rawNT.png", rawhypoNT, width = 3.5, height = 3, dpi = 600)
 ```
 
 ```{r fig.width=3.5, fig.height=3}
@@ -582,7 +551,7 @@ t.test(mean_pair_NT$fall_hypo, mean_pair_NT$fall_real, paired = T)
 ```
 
 ```{r}
-ggsave("../figures/hyp_summer/muNT.png", meanhypoNT, width = 3.5, height = 3)
+ggsave("../figures/hyp_summer/muNT.png", meanhypoNT, width = 3.5, height = 3, dpi = 600)
 ```
 
 ## Counterfactual NDVI
@@ -613,7 +582,7 @@ Make a plot of raw temps with raw hypo temps.
    theme(legend.position = "none"))
 ```
 ```{r}
-ggsave("../figures/hyp_summer/rawNDVI.png", rawhypoNDVI, width = 3.5, height = 3)
+ggsave("../figures/hyp_summer/rawNDVI.png", rawhypoNDVI, width = 3.5, height = 3, dpi = 600)
 ```
 
 ```{r fig.width=3.5, fig.height=3}
@@ -655,7 +624,7 @@ names(season.names) <- c("spring", "summer", "fall")
     facet_grid(cols = vars(season), scales = "free"))
 ```
 ```{r}
-ggsave("../figures/hyp_summer/muNDVI.png", meanhypoNDVI, width = 3.5, height = 3)
+ggsave("../figures/hyp_summer/muNDVI.png", meanhypoNDVI, width = 3.5, height = 3, dpi = 600)
 ```
 
 Get mean pairwise difference:
@@ -699,7 +668,7 @@ legend <- g_legend(hypSummLeg)
 grid.arrange(legend)
 ```
 ```{r}
-ggsave("../figures/hyp_summer/legend.png", legend, width = 7, height = 0.5)
+ggsave("../figures/hyp_summer/legend.png", legend, width = 7, height = 0.5, dpi = 600)
 ```
 
 #Counterfactual Winter
@@ -734,7 +703,7 @@ Make a plot of raw temps with raw hypo temps.
 ```
 
 ```{r}
-ggsave("../figures/hyp_winter/rawNT.png", rawhypoNTwint, width = 3.5, height = 3)
+ggsave("../figures/hyp_winter/rawNT.png", rawhypoNTwint, width = 3.5, height = 3, dpi = 600)
 ```
 
 ```{r}
@@ -778,7 +747,7 @@ ggsave("../figures/hyp_winter/rawNT.png", rawhypoNTwint, width = 3.5, height = 3
    facet_grid(cols = vars(season), scales = "free"))
 ```
 ```{r}
-ggsave("../figures/hyp_winter/meanNT.png", meanhypoNTwint, width = 3.5, height = 3)
+ggsave("../figures/hyp_winter/meanNT.png", meanhypoNTwint, width = 3.5, height = 3, dpi = 600)
 ```
 
 Get mean pairwise difference:
@@ -823,7 +792,7 @@ Make a plot of raw temps with raw hypo temps.
 ```
 
 ```{r}
-ggsave("../figures/hyp_winter/rawNNDVI.png", rawhypoNDVIwint, width = 3.5, height = 3)
+ggsave("../figures/hyp_winter/rawNNDVI.png", rawhypoNDVIwint, width = 3.5, height = 3, dpi = 600)
 ```
 
 ```{r}
@@ -859,7 +828,7 @@ ggsave("../figures/hyp_winter/rawNNDVI.png", rawhypoNDVIwint, width = 3.5, heigh
    facet_grid(cols = vars(season), scales = "free"))
 ```
 ```{r}
-ggsave("../figures/hyp_winter/meanNDVI.png", meanhypoNDVIwint, width = 3.5, height = 3)
+ggsave("../figures/hyp_winter/meanNDVI.png", meanhypoNDVIwint, width = 3.5, height = 3, dpi = 600)
 ```
 
 Get mean pairwise difference:
@@ -902,7 +871,7 @@ hypWintLeg <- ggplot(merge_temps) +
 
 legend <- g_legend(hypWintLeg)
 grid.arrange(legend)
-ggsave("../figures/hyp_winter/legend.png", hypWintLeg, width = 7, height = 0.5)
+ggsave("../figures/hyp_winter/legend.png", hypWintLeg, width = 7, height = 0.5, dpi = 600)
 ```
 
 # Breeding Season Transitions
@@ -940,8 +909,8 @@ hc_temp <- comb_temp_split$`BIG HORN COLORADO, CO US`
 
 
 #build GAM of temp for local weather stations (Platoro-HC, Florissant-MEF)
-fm_mef <- gam(TMIN ~ s(doy), data = mef_temp)
-fm_hc <- gam(TMIN ~ s(doy), data = hc_temp)
+fm_mef <- gam(tmin_c ~ s(doy), data = mef_temp)
+fm_hc <- gam(tmin_c ~ s(doy), data = hc_temp)
 
 summary(fm_mef)
 summary(fm_hc)
@@ -989,7 +958,7 @@ hc_plot <- ggplot() +
   geom_hline(yintercept = hc_arr, linetype = "twodash", color = "purple") +
   xlab("Day of Year") +
   ylab("Temp (C)") +
-  ylim(-20,10) +
+  # ylim(-20,10) +
   #geom_text(aes(x = 55, y = 8, label = "Conejos County, CO")) +
   theme_few())
 
@@ -1009,7 +978,7 @@ hc_plot <- ggplot() +
   geom_hline(yintercept = mef_arr, linetype = "twodash", color = "purple") +
   xlab("Day of Year") +
   ylab("Temp (C)") +
-  ylim(-20,10) +
+  # ylim(-20,10) +
   #geom_text(aes(x = 50, y = 8, label = "Teller County, CO")) +
   theme_few())
 
@@ -1115,8 +1084,8 @@ gl_phen <- list(hc_plot, mef_plot, hc_ndvi_plot, mef_ndvi_plot)
                         c(2, 4))
 ))
 
-ggsave("../figures/breed_phen.pdf", hypontwintfig)
-ggsave("../figures/breed_phen.png", hypontwintfig)
+ggsave("../figures/breed_phen.pdf", hypontwintfig, dpi = 600)
+ggsave("../figures/breed_phen.png", hypontwintfig, dpi = 600)
 ```
 
 
@@ -1159,7 +1128,8 @@ Plot worldclim seasonality with eBird winter distributions
    xlab("Longitude") +
    ylab("Latitude"))
 
-ggsave("../figures/winter_worldclim_ebd.png")
+ggsave("../figures/winter_worldclim_ebd.png", dpi = 600)
+ggsave("../figures/winter_worldclim_ebd.pdf", dpi = 600)
 ```
 
 Get worldclim value for each observation.

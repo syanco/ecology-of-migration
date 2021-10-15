@@ -751,14 +751,11 @@ rm(raster_ts)
 ```
 
 Load in HC and MEF long-term NDVI for time-series.
-```{r}
-load("../data/HC_ndvi/VI_16Days_500m_v6/Time_Series/RData/Terra/NDVI/MOD13A1_NDVI_49_2000_1_2020_RData.RData")
-HC_ndvi <- raster_ts
-rm(raster_ts)
 
-load("../data/MEF_ndvi/VI_16Days_500m_v6/Time_Series/RData/Terra/NDVI/MOD13A1_NDVI_49_2000_1_2020_RData.RData")
+```{r}
+load("../data/co_HDF/VI_16Days_500m_v6/Time_Series/RData/Terra/NDVI/MOD13A1_NDVI_1_2016_1_2021_RData.RData")
 MEF_ndvi <- raster_ts
-rm(raster_ts)
+HC_ndvi <- raster_ts
 ```
 
 
@@ -1361,6 +1358,8 @@ paired_4 <- merge_ndvi_wint %>%
 paired_ndvi_wint <- merge_ndvi_wint %>% 
   inner_join(paired_4, by = c("bird", "season"))
 ```
+
+
 # Breeding season conditions at transitions
 
 ## Min Temp
@@ -1400,7 +1399,7 @@ comb_temp_split <- split(comb_temp, comb_temp$NAME)
 Pull time series of NDVI values for Hot Creek breeding centroid dating back to 1999/2000
 ```{r}
 HC_ndvi_ts <- MODIStsp_extract(in_rts = HC_ndvi, 
-                               sf_object = hc_cent, 
+                               sf_object = hc_cent_sp, 
                                out_format = "dframe")
 HC_ndvi_ts$`1` <- HC_ndvi_ts$`1`*.0001
 HC_ndvi_ts$ndvi <- HC_ndvi_ts$`1`
@@ -1496,6 +1495,7 @@ save(ndvi_df, temp_df,
      paired_ndvi_wint,
      merge_temps_wint,
      merge_temps,
+     comb_temp,
      comb_temp_split,
      ebd_sf,
      file = paste0("../out/extract_", Sys.Date(), ".Rdata"))
