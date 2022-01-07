@@ -8,6 +8,8 @@ This workflow is basically built as two RMarkdown documents that can be run end-
 1. load_and_process_data.Rmd  
 2. analysis_and_plots.Rmd
 
+Custom functions used in the workflow are found in 'functions.R'.
+
 The code anticipates the follwoing minimal directory structure:
 ```
 project root
